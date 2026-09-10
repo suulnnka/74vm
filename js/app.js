@@ -1034,29 +1034,7 @@ canvas.addEventListener('wheel', e => {
   app.cam.y = wy - (sy - r.height / 2) / app.cam.zoom;
 }, { passive: false });
 
-canvas.addEventListener('dblclick', e => {
-  if (app.mode === 'breadboard') return bbDblClick(e);
-  if (app.mode === 'pcb') return pcbDblClick(e);
-  const w = toWorld(e);
-  const ch = chipAt(w);
-  if (!ch) return;
-  if (ch.type === 'CLOCK') {
-    const s = prompt('时钟频率 (Hz, 0.1 ~ 20000):', ch.props.freq || 2);
-    if (s == null) return;
-    const f = parseFloat(s);
-    if (isNaN(f) || f < 0.1 || f > 20000) { toast('无效频率', 'err'); return; }
-    ch.props.freq = f;
-    ch.state.nextT = sim.simTime + sim.clockHalf(ch);
-    sim.touch();
-    toast('时钟已设为 ' + f + ' Hz');
-  } else {
-    const s = prompt('元件标签 (留空清除):', ch.props.label || '');
-    if (s == null) return;
-    ch.props.label = s.trim();
-    sim.touch();
-    scheduleSave();
-  }
-});
+/* 标签/频率编辑统一走右键菜单"编辑标签…", 不再支持双击 */
 
 /* ================= 右键菜单 ================= */
 
@@ -2161,13 +2139,6 @@ function bbPointerUp(e) {
   }
 }
 
-function bbDblClick(e) {
-  const w = toWorld(e);
-  const ch = bbChipAt(w);
-  if (!ch) return;
-  editLabelOrFreq(ch);
-}
-
 function bbContextMenu(e) {
   const w = toWorld(e);
   const ch = bbChipAt(w);
@@ -2673,12 +2644,6 @@ function pcbPointerUp(e) {
     if (app.drag.moved) { sim.touch(); scheduleSave(); }
     app.drag = null;
   }
-}
-
-function pcbDblClick(e) {
-  const w = toWorld(e);
-  const ch = pcbChipAt(w);
-  if (ch) editLabelOrFreq(ch);
 }
 
 function pcbContextMenu(e) {
