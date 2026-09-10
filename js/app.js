@@ -353,7 +353,7 @@ function drawDIP(ch, def, z) {
   ctx.fillText(def.type, 0, -8);
   ctx.fillStyle = COL.sub;
   ctx.font = '10px "Segoe UI","Microsoft YaHei",sans-serif';
-  ctx.fillText(def.desc, 0, 9);
+  ctx.fillText(t(def.desc), 0, 9);
 }
 
 /** 引脚圆点 + 名称 + 编号 */
@@ -789,7 +789,7 @@ function drawGhost() {
       ctx.fillText(def.type, gx, gy);
       ctx.fillStyle = '#6b7a8c';
       ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
-      ctx.fillText(def.desc, gx, gy + h / 2 + 9);
+      ctx.fillText(t(def.desc), gx, gy + h / 2 + 9);
     } else {
       const w = 44, h = 20;
       ctx.fillStyle = '#242c36';
@@ -829,7 +829,7 @@ function drawGhost() {
     ctx.fillText(def.type, gx, gy - 7);
     ctx.fillStyle = '#6b7a8c';
     ctx.font = '9.5px "Segoe UI","Microsoft YaHei",sans-serif';
-    ctx.fillText(def.desc, gx, gy + 8);
+    ctx.fillText(t(def.desc), gx, gy + 8);
   }
   ctx.globalAlpha = 1;
 }
@@ -2869,14 +2869,44 @@ function clearLcd12864Gfx(ch) {
   scheduleSave();
   toast(t('图形层已清除'));
 }
+/** 导出/复制 LCD 可见文字 (1602: 2 行, 12864: 4 行) */
+function lcdVisibleText(ch) {
+  const rows = ch.type === 'LCD12864' ? 4 : 2;
+  const dd = ch.state.ddram || [];
+  const out = [];
+  for (let r = 0; r < rows; r++) out.push(dd.slice(r * 16, r * 16 + 16).join('').replace(/\s+$/g, ''));
+  return out.join(String.fromCharCode(10));
+}
+function copyLcdText(ch) {
+  const text = lcdVisibleText(ch);
+  const fallback = () => Dialog.prompt({
+    title: '屏幕文字 — ' + memChipName(ch),
+    label: '当前屏幕内容 (手动复制):',
+    value: text, multiline: true, rows: 4, okText: '关闭',
+  });
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast('屏幕文字已复制到剪贴板')).catch(fallback);
+  } else fallback();
+}
+function exportLcdText(ch) {
+  const base = ch.props.label ? ch.props.label.replace(/[\\/:*?'<>|]+/g, '_') : ch.type + ch.id;
+  const fn = base + '.' + ch.type.toLowerCase() + '.txt';
+  downloadBlob(lcdVisibleText(ch), fn);
+  toast('已导出 ' + fn);
+}
+
 /** 右键菜单追加项: 存储器 (按 mem 配置识别) 与 LCD1602 */
 function memoryMenuItems(ch) {
   if (ch.type === 'LCD12864') return [
+    { text: t('复制屏幕文字'), fn: () => copyLcdText(ch) },
+    { text: t('导出屏幕文字 (.txt)'), fn: () => exportLcdText(ch) },
     { text: t('编辑显示文本…'), fn: () => editLcd12864Text(ch) },
     { text: t('清屏'), fn: () => { pushUndo(); ch.state.ddram.fill(' '); ch.state.gdram.fill(0); sim.touch(); sim.reevalAll(); scheduleSave(); toast(t('已清屏')); } },
     { text: t('清除图形'), fn: () => clearLcd12864Gfx(ch) },
   ];
   if (ch.type === 'LCD1602') return [
+    { text: t('复制屏幕文字'), fn: () => copyLcdText(ch) },
+    { text: t('导出屏幕文字 (.txt)'), fn: () => exportLcdText(ch) },
     { text: t('编辑显示文本…'), fn: () => editLcdText(ch) },
     { text: t('清屏'), fn: () => clearLcd(ch) },
   ];
@@ -3107,7 +3137,7 @@ function drawBBChip(ch, z) {
     if (rect.w > 70) {
       ctx.fillStyle = '#8ba0b6';
       ctx.font = '7.5px "Segoe UI","Microsoft YaHei",sans-serif';
-      ctx.fillText(def.desc, rect.x + rect.w / 2, rect.y + 33);
+      ctx.fillText(t(def.desc), rect.x + rect.w / 2, rect.y + 33);
     }
     // 引脚号 (印入机体, 贴近各自孔位一侧)
     if (z >= 0.8) {
@@ -3348,7 +3378,7 @@ function drawTray(mode, z) {
     ctx.fillText(def.type, t.x + 10, t.y + t.h / 2);
     ctx.fillStyle = '#6b7a8c';
     ctx.font = '9.5px "Segoe UI","Microsoft YaHei",sans-serif';
-    ctx.fillText(def.desc, t.x + 62, t.y + t.h / 2);
+    ctx.fillText(I18N.t(def.desc), t.x + 62, t.y + t.h / 2);
   }
   ctx.fillStyle = '#6b7a8c';
   ctx.font = '10px "Segoe UI","Microsoft YaHei",sans-serif';
