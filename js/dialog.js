@@ -1,16 +1,19 @@
-/* ================= 自定义弹窗组件 =================
-   替代系统原生 prompt/confirm。可用性:
+/* ================= 窗口组件 (窗口管理器) =================
+   替代系统原生 prompt/confirm。架构上支持未来多窗口并存:
+   - 窗口栈 wins: 后开者在上层 (z-index 递增), 新窗口背景透明只罩住交互
+   - Esc/Enter 只作用于获得焦点的最上层窗口
+   - 标题栏可拖动移位; 点遮罩取消 (仅最上层窗口响应)
+   单窗口可用性:
    - 打开即聚焦输入框并全选现有文本, 可直接输入覆盖
    - Enter = 确定, Esc = 取消 (焦点在任何弹窗控件上都生效)
-   - 点击遮罩/✕ = 取消; 点击弹窗内部不会误关
    - 校验失败: 红框+内联错误, 不关闭, 重新聚焦全选
    - 弹窗内按键 stopPropagation, 不会触发画布快捷键 (空格暂停/R旋转等) */
 
 const Dialog = (() => {
-  let cur = null;   // 当前弹窗 { close }
+  const wins = [];   // 存活窗口栈, 末尾 = 最上层
+  let zTop = 300;    // 与 .modal 基准 z-index 一致, 每窗递增
 
   function open(opts) {
-    if (cur) cur.close(null);   // 重复打开时先取消上一个
     const o = Object.assign({
       title: '', message: '', label: null, value: '', placeholder: '',
       okText: '确定', cancelText: '取消', danger: false, validate: null,
@@ -20,19 +23,22 @@ const Dialog = (() => {
       const finish = v => {
         if (done) return;
         done = true;
+        const i = wins.indexOf(win);
+        if (i >= 0) wins.splice(i, 1);
         overlay.remove();
-        cur = null;
         resolve(v);
       };
 
+      const stacked = wins.length > 0;   // 之上已有窗口: 透明遮罩, 不再压暗
       const overlay = document.createElement('div');
-      overlay.className = 'modal';
+      overlay.className = 'modal' + (stacked ? ' stacked' : '');
+      overlay.style.zIndex = ++zTop;
 
       const box = document.createElement('div');
       box.className = 'modal-box dialog-box';
 
       const head = document.createElement('div');
-      head.className = 'modal-head';
+      head.className = 'modal-head dlg-head';
       const title = document.createElement('b');
       title.textContent = o.title;
       const x = document.createElement('button');
@@ -105,10 +111,32 @@ const Dialog = (() => {
         input.classList.remove('invalid');
         errEl.style.display = 'none';
       });
+      // 标题栏拖动移位 (✕ 按钮除外)
+      head.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || e.target.closest('button')) return;
+        e.preventDefault();
+        const r = box.getBoundingClientRect();
+        box.style.position = 'fixed';
+        box.style.left = r.left + 'px';
+        box.style.top = r.top + 'px';
+        box.style.width = r.width + 'px';
+        const dx = e.clientX - r.left, dy = e.clientY - r.top;
+        const move = ev => {
+          box.style.left = Math.max(0, ev.clientX - dx) + 'px';
+          box.style.top = Math.max(0, ev.clientY - dy) + 'px';
+        };
+        const up = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+      });
 
+      const win = { close: finish };
+      wins.push(win);
       btnOk.onclick = ok;
       document.body.appendChild(overlay);
-      cur = { close: finish };
       (input || btnOk).focus();
       if (input && input.value) input.select();
     });
@@ -119,5 +147,9 @@ const Dialog = (() => {
     prompt: opts => open(Object.assign({ label: '', validate: null }, opts)),
     /* confirm({...}) → Promise<boolean> */
     confirm: opts => open(Object.assign({ message: '' }, opts)),
+    /* 关闭全部窗口 (上层先关) */
+    closeAll: () => { for (const w of [...wins].reverse()) w.close(null); },
+    /* 当前并存窗口数 */
+    get count() { return wins.length; },
   };
 })();

@@ -195,6 +195,9 @@ select.btn { padding: 4px 6px; }
 
 /* ---------- 自定义弹窗 (prompt / confirm) ---------- */
 .dialog-box { width: min(430px, 92vw); }
+/* 多窗口层叠: 上层窗口透明遮罩, 可看到下层窗口但交互只在上层 */
+.modal.stacked { background: none; }
+.dlg-head { cursor: move; user-select: none; }
 .dlg-body { padding: 16px 20px 6px; }
 .dlg-msg { font-size: 13px; line-height: 1.6; }
 .dlg-label {
