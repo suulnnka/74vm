@@ -118,6 +118,7 @@ class Engine {
       state: state ? state : {},
       pins: [], pinByNum: {},
       _evalQueued: false,
+      powered: true,             // 供电标志 (面包板模式按电源脚连通性更新)
     };
     d.pins.forEach((p, i) => {
       const pin = {
@@ -283,6 +284,7 @@ class Engine {
     for (const n of this.nets) before.set(n, n.value);
     let kicked = false;
     for (const ch of this.chips.values()) {
+      if (ch.powered === false) continue;   // 未上电芯片的 X 输出不被扰动
       const d = this.lib[ch.type];
       if (!d.gates) continue;
       for (const g of d.gates) {
@@ -355,6 +357,11 @@ class Engine {
     if (!d) return;
     ch._evalQueued = false;
     if (!d.gates && !d.eval) return;
+    if (ch.powered === false) {
+      // 未上电: 输出脚强制 X (io 脚不驱动, 保持高阻不拖总线)
+      for (const p of ch.pins) if (p.dir === 'out') this.drivePin(ch, p.num, VX);
+      return;
+    }
     const E = this.api(ch);
     try {
       if (d.gates) {

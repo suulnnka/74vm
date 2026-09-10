@@ -474,41 +474,41 @@ def('74245', '八路总线收发器', '总线接口', [
 /* ========================= 输入 / 输出元件 ========================= */
 
 def('SW', '开关·单击切换', '输入/输出', [R(1, 'Q', 'out')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
+  custom: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { const p = ch.pinByNum[1]; p.driven = ch.state.on ? 1 : 0; },
 });
 
 def('BTN', '按键·按住=1', '输入/输出', [R(1, 'Q', 'out')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
+  custom: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 0; },
 });
 
 def('CLOCK', '时钟源·右键改频率', '输入/输出', [R(1, 'CLK', 'out')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
+  custom: true, hideNums: true, size: { w: 56, h: 56 },
   defaults: { freq: 2 },
   init(ch) { ch.state.phase = ch.state.phase || 0; ch.pinByNum[1].driven = ch.state.phase ? 1 : 0; },
 });
 
 def('LED', 'LED 指示灯', '输入/输出', [L(1, 'IN', 'in')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
+  custom: true, hideNums: true, size: { w: 56, h: 56 },
 });
 
 def('SEG7', '七段数码管·共阴', '输入/输出', [
   L(1, 'a', 'in'), L(2, 'b', 'in'), L(3, 'c', 'in'), L(4, 'd', 'in'),
   L(5, 'e', 'in'), L(6, 'f', 'in'), L(7, 'g', 'in'), L(8, 'dp', 'in'),
-], { custom: true, fixedRot: true, hideNums: true, size: { w: 168 } });
+], { custom: true, hideNums: true, size: { w: 168 } });
 
 def('PROBE', '逻辑探针·显示电平', '输入/输出', [L(1, 'IN', 'in')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
+  custom: true, hideNums: true, size: { w: 56, h: 56 },
 });
 
 def('VCC', '电源 +5V·恒1', '输入/输出', [R(1, '5V', 'out')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
+  custom: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 1; },
 });
 
 def('GND', '地 GND·恒0', '输入/输出', [R(1, 'GND', 'out')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
+  custom: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 0; },
 });
 
@@ -565,7 +565,7 @@ function ps2Tick(ch, e) {
 def('PS2', 'PS/2键盘·点击后打字', '输入/输出', [
   R(1, 'CLK', 'out'), R(2, 'DATA', 'out'),
 ], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 168, h: 112 },
+  custom: true, hideNums: true, size: { w: 168, h: 112 },
   init(ch) {
     const s = ch.state;
     if (!Array.isArray(s.queue)) s.queue = [];

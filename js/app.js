@@ -44,6 +44,7 @@ const app = {
   libShown: true,
   bbLabels: true,   // 面包板元件标识 (关=悬停显示)
   dnd: null,   // 原生拖放状态 {type, x, y}
+  kbChip: null,   // PS/2 键盘聚焦的元件 (打字 → 扫描码)
 };
 app.cam = app.cams.schematic;
 
@@ -155,6 +156,7 @@ function rr(x, y, w, h, r) {
 
 function draw() {
   resizeCanvas();
+  if (app.kbChip && !sim.chips.has(app.kbChip.id)) app.kbChip = null;   // 聚焦元件已删除
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#eef1f6';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -251,8 +253,13 @@ function drawWires() {
 function drawChips(z) {
   for (const ch of sim.chips.values()) {
     const def = LIB[ch.type];
+    // 通用旋转: 全部元件在局部坐标绘制, 旋转由统一变换完成
+    ctx.save();
+    ctx.translate(ch.x, ch.y);
+    if (ch.rot) ctx.rotate(ch.rot * Math.PI / 180);
     if (def.custom) drawIO(ch, def, z);
     else drawDIP(ch, def, z);
+    ctx.restore();
     // 标签
     if (ch.props.label) {
       const half = chipHalf(ch);
@@ -281,10 +288,9 @@ function drawAllPins(z) {
 
 function drawDIP(ch, def, z) {
   const { w, h } = chipSize(def);
-  const half = chipHalf(ch);
   const hov = app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id;
   ctx.fillStyle = COL.body;
-  rr(ch.x - half.x, ch.y - half.y, half.x * 2, half.y * 2, 6);
+  rr(-w / 2, -h / 2, w, h, 6);
   ctx.fill();
   ctx.strokeStyle = isSelected('chip', ch.id) ? COL.sel : (hov ? '#5f7386' : COL.bodyBorder);
   ctx.lineWidth = isSelected('chip', ch.id) ? 1.6 : 1;
@@ -293,10 +299,10 @@ function drawDIP(ch, def, z) {
   ctx.fillStyle = COL.head;
   ctx.font = 'bold 13px Consolas, monospace';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(def.type, ch.x, ch.y - 8);
+  ctx.fillText(def.type, 0, -8);
   ctx.fillStyle = COL.sub;
   ctx.font = '10px "Segoe UI","Microsoft YaHei",sans-serif';
-  ctx.fillText(def.desc, ch.x, ch.y + 9);
+  ctx.fillText(def.desc, 0, 9);
 }
 
 /** 引脚圆点 + 名称 + 编号 */
@@ -356,10 +362,7 @@ function drawPins(ch, def, z) {
 /* ---------- 输入/输出元件自定义绘制 ---------- */
 
 function drawIO(ch, def, z) {
-  const { w, h } = chipSize(def);
-  ctx.save();
-  ctx.translate(ch.x, ch.y);
-  if (ch.rot) ctx.rotate(ch.rot * Math.PI / 180);
+  const { w, h } = chipSize(def);   // 局部坐标, 旋转变换由 drawChips 统一施加
   const hov = app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id;
   const half = { x: w / 2, y: h / 2 };
 
@@ -509,6 +512,49 @@ function drawIO(ch, def, z) {
       }
       break;
     }
+    case 'PS2': {
+      const t = ch._ps2;
+      const focused = app.kbChip === ch;
+      if (focused) {
+        ctx.fillStyle = 'rgba(2,136,209,.07)';
+        rr(-half.x + 2, -half.y + 2, w - 4, h - 4, 6); ctx.fill();
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = COL.sel; ctx.lineWidth = 1.4;
+        rr(-half.x + 2, -half.y + 2, w - 4, h - 4, 6); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // 标题 + 发送指示灯
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 11px Consolas, monospace';
+      ctx.fillStyle = '#1f2937'; ctx.textAlign = 'left';
+      ctx.fillText('PS/2', -half.x + 10, -half.y + 13);
+      ctx.beginPath(); ctx.arc(half.x - 12, -half.y + 12, 4, 0, Math.PI * 2);
+      ctx.fillStyle = (t && t.active) ? COL.v1 : '#cfd8e3'; ctx.fill();
+      ctx.strokeStyle = '#8fa1b3'; ctx.lineWidth = 1; ctx.stroke();
+      // 键位网格 (3×10)
+      const gx = -half.x + 10, gy = -half.y + 22, gw = w - 20, gh = 56;
+      ctx.fillStyle = '#e8edf3';
+      rr(gx, gy, gw, gh, 4); ctx.fill();
+      ctx.strokeStyle = '#c3cedb'; ctx.lineWidth = 1; ctx.stroke();
+      const kw = (gw - 8) / 10, kh = (gh - 8) / 3;
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#aebbc9';
+      for (let r2 = 0; r2 < 3; r2++) for (let c = 0; c < 10; c++) {
+        rr(gx + 4 + c * kw + 1, gy + 4 + r2 * kh + 1, kw - 2, kh - 2, 2);
+        ctx.fill(); ctx.stroke();
+      }
+      // 状态行: 发送状态 + 最后发出的扫描码 + 队列积压
+      const nq = ch.state.queue.length;
+      const lastTxt = ch.state.lastByte != null
+        ? '0x' + ch.state.lastByte.toString(16).toUpperCase().padStart(2, '0') : '--';
+      ctx.font = '10px Consolas, monospace';
+      ctx.fillStyle = '#43566a'; ctx.textAlign = 'center';
+      ctx.fillText((t && t.active ? 'TX ' : 'IDLE ') + lastTxt + (nq ? ' +' + nq : ''), 0, gy + gh + 11);
+      ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = focused ? COL.sel : '#6b7a8c';
+      ctx.fillText(focused ? '输入中… Esc 退出' : '点击后打字', 0, half.y - 7);
+      break;
+    }
     case 'VCC': {
       ctx.strokeStyle = '#d32f2f';
       ctx.lineWidth = 1.8;
@@ -538,7 +584,6 @@ function drawIO(ch, def, z) {
       break;
     }
   }
-  ctx.restore();
 }
 
 function drawWiringPreview() {
@@ -882,11 +927,12 @@ canvas.addEventListener('pointerdown', e => {
     }
     const chips = Array.from(app.selection).filter(s => s.kind === 'chip')
       .map(s => sim.chips.get(s.id)).filter(Boolean);
-    if (ch.type === 'SW' || ch.type === 'BTN') {
+    if (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2') {
       app.drag = { kind: 'press', ch, start: w, moved: false,
         offs: chips.map(c => ({ c, dx: c.x - w.x, dy: c.y - w.y })) };
       if (ch.type === 'BTN') sim.driveNow(ch, 1, 1); // 按下
     } else {
+      if (app.kbChip) setKbFocus(null);
       app.drag = { kind: 'move', start: w, moved: false,
         offs: chips.map(c => ({ c, dx: c.x - w.x, dy: c.y - w.y })) };
     }
@@ -897,6 +943,7 @@ canvas.addEventListener('pointerdown', e => {
   if (wI) { selectOnly('wire', wI.id); return; }
 
   clearSelection();   // 左键点击空白: 仅取消选择 (平移用右键/中键拖动)
+  if (app.kbChip) setKbFocus(null);
 });
 
 canvas.addEventListener('pointermove', e => {
@@ -973,7 +1020,7 @@ function updateHover(w) {
   const ch = chipAt(w);
   if (ch) {
     app.hover = { kind: 'chip', id: ch.id };
-    canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN') ? CURSORS.pointer : CURSORS.grab;
+    canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2') ? CURSORS.pointer : CURSORS.grab;
     return;
   }
   const wI = wireAt(w);
@@ -1026,6 +1073,8 @@ canvas.addEventListener('pointerup', e => {
         sim.driveNow(ch, 1, ch.state.on);
       } else if (ch.type === 'BTN') {
         sim.driveNow(ch, 1, 0);
+      } else if (ch.type === 'PS2') {
+        setKbFocus(app.kbChip === ch ? null : ch);   // 单击切换打字聚焦
       }
     } else if (app.drag.kind === 'move' && app.drag.moved) {
       sim.touch();
@@ -1116,8 +1165,9 @@ canvas.addEventListener('contextmenu', e => {
   const ch = pinHit ? pinHit.ch : chipAt(w);
   if (ch) {
     const items = [];
-    if (!LIB[ch.type].fixedRot) items.push({ text: '旋转 90° (R)', fn: () => rotateChip(ch) });
+    items.push({ text: '旋转 90° (R)', fn: () => rotateChip(ch) });
     items.push({ text: ch.type === 'CLOCK' ? '编辑频率…' : '编辑标签…', fn: () => editLabelOrFreq(ch) });
+    if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? '退出打字 (Esc)' : '聚焦打字…', fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
     items.push(...memoryMenuItems(ch));
     items.push({ text: '复制 (Ctrl+D)', fn: () => duplicateSelection() });
     items.push({ text: '删除 (Del)', fn: () => deleteChip(ch) });
@@ -1183,7 +1233,7 @@ function deleteSelection() {
 }
 function rotateSelection() {
   const chips = Array.from(app.selection).filter(s => s.kind === 'chip')
-    .map(s => sim.chips.get(s.id)).filter(c => c && !LIB[c.type].fixedRot);
+    .map(s => sim.chips.get(s.id)).filter(Boolean);
   if (!chips.length) return;
   pushUndo();
   for (const c of chips) c.rot = ((c.rot || 0) + 90) % 360;
@@ -1217,9 +1267,79 @@ function duplicateSelection() {
 
 /* ================= 键盘 ================= */
 
+/* ---------- PS/2 键盘打字聚焦 (Set 2 扫描码, 按物理键位 e.code 映射) ---------- */
+
+const PS2_CODE = {
+  KeyA: 0x1C, KeyB: 0x32, KeyC: 0x21, KeyD: 0x23, KeyE: 0x24, KeyF: 0x2B,
+  KeyG: 0x34, KeyH: 0x33, KeyI: 0x43, KeyJ: 0x3B, KeyK: 0x42, KeyL: 0x4B,
+  KeyM: 0x3A, KeyN: 0x31, KeyO: 0x44, KeyP: 0x4D, KeyQ: 0x15, KeyR: 0x2D,
+  KeyS: 0x1B, KeyT: 0x2C, KeyU: 0x3C, KeyV: 0x2A, KeyW: 0x1D, KeyX: 0x22,
+  KeyY: 0x35, KeyZ: 0x1A,
+  Digit1: 0x16, Digit2: 0x1E, Digit3: 0x26, Digit4: 0x25, Digit5: 0x2E,
+  Digit6: 0x36, Digit7: 0x3D, Digit8: 0x3E, Digit9: 0x46, Digit0: 0x45,
+  Enter: 0x5A, Space: 0x29, Backspace: 0x66, Escape: 0x76, Tab: 0x0D,
+  CapsLock: 0x58,
+  F1: 0x05, F2: 0x06, F3: 0x04, F4: 0x0C, F5: 0x03, F6: 0x0B,
+  F7: 0x83, F8: 0x0A, F9: 0x01, F10: 0x09, F11: 0x78, F12: 0x07,
+  Minus: 0x55, Equal: 0x4E, BracketLeft: 0x54, BracketRight: 0x5B,
+  Backslash: 0x5D, Semicolon: 0x4C, Quote: 0x52, Backquote: 0x0E,
+  Comma: 0x41, Period: 0x49, Slash: 0x4A,
+  ShiftLeft: 0x12, ShiftRight: 0x59, ControlLeft: 0x14, AltLeft: 0x11,
+  Numpad0: 0x70, Numpad1: 0x69, Numpad2: 0x72, Numpad3: 0x7A,
+  Numpad4: 0x6B, Numpad5: 0x73, Numpad6: 0x74, Numpad7: 0x6C,
+  Numpad8: 0x75, Numpad9: 0x7D, NumpadMultiply: 0x7C, NumpadSubtract: 0x7B,
+  NumpadAdd: 0x79, NumpadDecimal: 0x71,
+};
+/** 扩展键: 发送 0xE0 前缀 + 扫描码 */
+const PS2_EXT = {
+  ArrowUp: 0x75, ArrowDown: 0x72, ArrowLeft: 0x6B, ArrowRight: 0x74,
+  ControlRight: 0x14, AltRight: 0x11, NumpadEnter: 0x5A, NumpadDivide: 0x4A,
+  Home: 0x6C, End: 0x69, PageUp: 0x7D, PageDown: 0x7A,
+  Insert: 0x70, Delete: 0x71, MetaLeft: 0x5B, MetaRight: 0x5C, ContextMenu: 0x5D,
+};
+
+/** 入队待发字节并触发发送 (队列上限 64, 溢出丢最旧) */
+function ps2Queue(ch, bytes) {
+  const q = ch.state.queue;
+  if (q.length + bytes.length > 64) q.splice(0, q.length + bytes.length - 64);
+  q.push(...bytes);
+  sim.evalChip(ch);
+}
+
+function ps2Keydown(ch, e) {
+  if (e.repeat) return;                       // 忽略操作系统自动重复
+  const code = PS2_CODE[e.code] != null ? PS2_CODE[e.code] : PS2_EXT[e.code];
+  if (code == null) return;
+  if (PS2_EXT[e.code] != null) ps2Queue(ch, [0xE0, code]);
+  else if (e.code === 'CapsLock') ps2Queue(ch, [code]);   // CapsLock 无 Break, 松开再发一次 Make
+  else ps2Queue(ch, [code]);
+}
+
+function ps2Keyup(ch, e) {
+  const code = PS2_CODE[e.code] != null ? PS2_CODE[e.code] : PS2_EXT[e.code];
+  if (code == null) return;
+  if (e.code === 'CapsLock') ps2Queue(ch, [code]);
+  else if (PS2_EXT[e.code] != null) ps2Queue(ch, [0xE0, 0xF0, code]);
+  else ps2Queue(ch, [0xF0, code]);            // Break 码 = F0 + Make
+}
+
+/** PS/2 打字聚焦 (仅 PS2 元件); 聚焦期间所有按键被捕获为扫描码 */
+function setKbFocus(ch) {
+  const on = !!(ch && ch.type === 'PS2');
+  app.kbChip = on ? ch : null;
+  if (on) { app.wiring = null; app.bbWiring = null; toast('键盘聚焦: 直接打字发送扫描码, Esc 退出'); }
+  draw();
+}
+
 window.addEventListener('keydown', e => {
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  if (app.kbChip) {                           // 打字聚焦: 吞掉全部快捷键
+    e.preventDefault();
+    if (e.key === 'Escape') { setKbFocus(null); return; }
+    ps2Keydown(app.kbChip, e);
+    return;
+  }
   const k = e.key;
   if (k === 'Escape') { app.wiring = null; app.bbWiring = null; clearSelection(); }
   else if (k === 'Delete' || k === 'Backspace') {
@@ -1242,6 +1362,12 @@ window.addEventListener('keydown', e => {
   else if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'Z') && !e.shiftKey) { e.preventDefault(); undo(); }
   else if ((e.ctrlKey || e.metaKey) && ((k === 'y' || k === 'Y') || ((k === 'z' || k === 'Z') && e.shiftKey))) { e.preventDefault(); redo(); }
   else if ((e.ctrlKey || e.metaKey) && (k === 'd' || k === 'D')) { e.preventDefault(); duplicateSelection(); }
+});
+
+window.addEventListener('keyup', e => {
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  if (app.kbChip) { e.preventDefault(); ps2Keyup(app.kbChip, e); }
 });
 
 /* ================= 元件库侧栏 ================= */
@@ -1764,8 +1890,15 @@ function updateStatus() {
   document.getElementById('stCount').textContent =
     '元件 ' + sim.chips.size + ' · 导线 ' + sim.wires.length + ' · 事件 ' + fmtNum(sim.eventCount);
   document.getElementById('stZoom').textContent = '缩放 ' + Math.round(app.cam.zoom * 100) + '%';
+  let wtxt = sim.overload ? '⚠ 事件过载(电路可能振荡或规模过大)' : '';
+  if (app.mode === 'breadboard') {
+    let n = 0;
+    for (const ch of sim.chips.values())
+      if (ch.bb && ch.bb.kind === 'dip' && ch.powered === false) n++;
+    if (n) wtxt += (wtxt ? '  ·  ' : '') + '⚡ ' + n + ' 颗芯片未接电源 (VCC/GND 列 → 电源轨)';
+  }
   const warn = document.getElementById('stWarn');
-  warn.textContent = sim.overload ? '⚠ 事件过载(电路可能振荡或规模过大)' : '';
+  warn.textContent = wtxt;
   sim.overload = sim.overload && sim.q.size > 1000; // 队列排空后自动清除
 }
 
@@ -1798,7 +1931,15 @@ function frame() {
 function switchMode(m) {
   if (m === app.mode) return;
   const prev = app.mode;
-  if (prev === 'breadboard') sim.setWiresRaw(app.schematicWires || []);
+  if (app.kbChip) app.kbChip = null;          // 切换模式退出打字聚焦
+  if (prev === 'breadboard') {
+    sim.setWiresRaw(app.schematicWires || []);
+    // 离开面包板: 原理图无供电概念, 全部恢复上电
+    let changed = false;
+    for (const ch of sim.chips.values())
+      if (ch.powered === false) { ch.powered = true; changed = true; }
+    if (changed) sim.reevalAll();
+  }
   app.mode = m;
   app.cam = app.cams[m];
   app.wiring = null; app.bbWiring = null; app.hover = null; clearSelection();
@@ -1887,6 +2028,20 @@ function applyBB() {
   const wires = BB.deriveWires(sim, app.bb.jumpers);
   sim.setWiresRaw(wires);
   app.bb.netInfo = BB.computeNets(sim, app.bb.jumpers);
+  bbUpdatePower();
+}
+
+/** 供电检查: DIP 需 VCC/GND 电源脚列接通电源轨, 未上电芯片由引擎强制输出 X */
+function bbUpdatePower() {
+  if (app.mode !== 'breadboard') return;
+  let changed = false;
+  for (const ch of sim.chips.values()) {
+    const on = BB.chipPowered(app.bb.netInfo, ch);
+    if (ch.powered !== on) changed = true;
+    ch.powered = on;
+  }
+  if (changed) sim.reevalAll();
+  updateStatus();
 }
 
 async function bbAutoAll(interactive) {
@@ -1918,6 +2073,16 @@ function bbNetValue(holeKey) {
   if (!pins || !pins.length) return null;
   const p = pins[0].chip.pinByNum[pins[0].pinNum];
   return p ? sim.pinDisplay(p) : null;
+}
+
+/** 孔位所在网络的电源极性 (0 无 / 1 + / 2 − / 3 冲突) */
+function bbHolePol(holeKey) {
+  return BB.holeNetPower(app.bb.netInfo, holeKey);
+}
+
+/** 电源极性 → 孔位/跳线配色 (无极性用 dflt) */
+function polColor(pol, dflt) {
+  return pol === 1 ? '#d9534f' : pol === 2 ? '#4a90d9' : pol === 3 ? COL.vx : dflt;
 }
 
 function bbHoleAt(w) {
@@ -2113,10 +2278,11 @@ function bbPointerDown(e) {
   const ch = bbChipAt(w);
   if (ch) {
     if (!isSelected('chip', ch.id)) selectOnly('chip', ch.id);
-    if (ch.type === 'SW' || ch.type === 'BTN') {
+    if (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2') {
       app.drag = { kind: 'bbPress', ch, start: w, moved: false };
       if (ch.type === 'BTN') sim.driveNow(ch, 1, 1);
     } else {
+      if (app.kbChip) setKbFocus(null);
       app.drag = { kind: 'bbMove', ch, start: w, moved: false };
     }
     return;
@@ -2135,6 +2301,7 @@ function bbPointerDown(e) {
   const j = bbJumperAt(w);
   if (j) { selectOnly('jumper', j.id); return; }
   clearSelection();   // 左键点击空白: 仅取消选择 (平移用右键/中键)
+  if (app.kbChip) setKbFocus(null);
 }
 
 function bbPointerMove(e) {
@@ -2167,7 +2334,7 @@ function bbPointerMove(e) {
   }
   // 悬停提示
   const ch = bbChipAt(w);
-  if (ch) { app.hover = { kind: 'chip', id: ch.id }; canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN') ? CURSORS.pointer : CURSORS.grab; hideTooltip(); return; }
+  if (ch) { app.hover = { kind: 'chip', id: ch.id }; canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2') ? CURSORS.pointer : CURSORS.grab; hideTooltip(); return; }
   const h = bbHoleAt(w);
   if (h) {
     app.hover = { kind: 'bbHole', hole: h };
@@ -2220,6 +2387,7 @@ function bbPointerUp(e) {
       const ch = d.ch;
       if (ch.type === 'SW') { ch.state.on = ch.state.on ? 0 : 1; sim.driveNow(ch, 1, ch.state.on); }
       else if (ch.type === 'BTN') sim.driveNow(ch, 1, 0);
+      else if (ch.type === 'PS2') setKbFocus(app.kbChip === ch ? null : ch);
     } else if (d.moved) {
       sim.touch(); scheduleSave();
     }
@@ -2235,6 +2403,7 @@ function bbContextMenu(e) {
     const items = [];
     if (!LIB[ch.type].custom) items.push({ text: '翻转 180° (R)', fn: () => bbFlip(ch) });
     items.push({ text: '编辑标签…', fn: () => editLabelOrFreq(ch) });
+    if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? '退出打字 (Esc)' : '聚焦打字…', fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
     items.push(...memoryMenuItems(ch));
     items.push({ text: '移出面包板 (Del)', fn: () => bbUnplace(ch) });
     items.push({ text: '彻底删除元件', fn: () => deleteChip(ch) });
@@ -2438,17 +2607,18 @@ function drawBreadboard(z) {
       ctx.fillText(String(c), B.colX(c), oy + B.ROW_Y.a - 12);
       ctx.fillText(String(c), B.colX(c), oy + B.ROW_Y.j + 12);
     }
-    // 孔位
+    // 孔位 (有电平按电平着色; 无电平但属电源网络按极性着色: 红=+ 蓝=− 橙=+−冲突)
     for (const row of B.ROWS_TOP.concat(B.ROWS_BOT)) {
       for (let c = 1; c <= cols; c++) {
         const key = b + ':' + row + c;
         const p = B.holePos(key);
         const v = bbNetValue(key);
+        const pol = bbHolePol(key);
         ctx.beginPath();
         ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2);
-        ctx.fillStyle = v == null ? '#3a3f45' : valColor(v);
+        ctx.fillStyle = v != null ? valColor(v) : polColor(pol, '#3a3f45');
         ctx.fill();
-        if (v != null) { ctx.strokeStyle = '#1a1d20'; ctx.lineWidth = 1; ctx.stroke(); }
+        if (v != null || pol) { ctx.strokeStyle = '#1a1d20'; ctx.lineWidth = 1; ctx.stroke(); }
       }
     }
     for (const r of B.RAILS) {
@@ -2456,11 +2626,12 @@ function drawBreadboard(z) {
         const key = b + ':' + r.id + '-' + c;
         const p = B.holePos(key);
         const v = bbNetValue(key);
+        const pol = bbHolePol(key);
         ctx.beginPath();
         ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2);
-        ctx.fillStyle = v == null ? '#3a3f45' : valColor(v);
+        ctx.fillStyle = v != null ? valColor(v) : polColor(pol, '#3a3f45');
         ctx.fill();
-        if (v == null) { ctx.strokeStyle = r.color + '60'; ctx.lineWidth = 1; ctx.stroke(); }
+        if (v == null && !pol) { ctx.strokeStyle = r.color + '60'; ctx.lineWidth = 1; ctx.stroke(); }
       }
     }
   }
@@ -2494,7 +2665,7 @@ function drawBreadboard(z) {
       ctx.quadraticCurveTo(cx, cy, b.x, b.y);
       ctx.stroke();
     }
-    ctx.strokeStyle = v == null ? '#9aa4b0' : valColor(v);
+    ctx.strokeStyle = v != null ? valColor(v) : polColor(bbHolePol(j.a), '#9aa4b0');
     ctx.lineWidth = 2.6;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
@@ -2558,6 +2729,15 @@ function drawBBChip(ch, z) {
     ctx.font = 'bold 11px Consolas, monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(def.type, rect.x + rect.w / 2, rect.y + 19);
+    // 未供电徽标
+    if (ch.powered === false) {
+      ctx.fillStyle = '#e53935';
+      rr(rect.x + rect.w - 34, rect.y + 4, 30, 12, 3);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 8px "Segoe UI","Microsoft YaHei",sans-serif';
+      ctx.fillText('未供电', rect.x + rect.w - 19, rect.y + 10);
+    }
     if (rect.w > 70) {
       ctx.fillStyle = '#8ba0b6';
       ctx.font = '7.5px "Segoe UI","Microsoft YaHei",sans-serif';
@@ -2595,6 +2775,14 @@ function drawBBChip(ch, z) {
       if (hp) { ctx.beginPath(); ctx.moveTo(hp.x, hp.y); ctx.lineTo(hp.x, legEnd); ctx.stroke(); }
     }
     drawIOGlyph(ch, rect.x + rect.w / 2, boxY + 13);
+    // 打字聚焦指示 (虚线外框)
+    if (app.kbChip === ch) {
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = COL.sel; ctx.lineWidth = 1.6;
+      rr(rect.x - 3, boxY - 3, rect.w + 6, 32, 6);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   } else {
     // 电源轨上的 VCC/GND
     const p = B.holePos((ch.bb.board || 0) + ':' + ch.bb.rail + '-' + ch.bb.col);
@@ -2697,6 +2885,17 @@ function drawIOGlyph(ch, cx, cy) {
       ctx.font = 'bold 11px Consolas, monospace';
       ctx.fillStyle = valColor(v);
       ctx.fillText(v === 'Z' ? 'Z' : String(v), cx, cy);
+      break;
+    }
+    case 'PS2': {
+      // 迷你键盘 (发送中描边变绿)
+      const on = !!(ch._ps2 && ch._ps2.active);
+      ctx.fillStyle = '#e8edf3';
+      rr(cx - 13, cy - 7, 26, 14, 2); ctx.fill();
+      ctx.strokeStyle = on ? COL.v1 : '#46545f'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = '#8a97a5';
+      for (let r2 = 0; r2 < 3; r2++) for (let c = 0; c < 6; c++)
+        ctx.fillRect(cx - 10 + c * 4, cy - 4 + r2 * 4, 3, 3);
       break;
     }
     default:

@@ -6,6 +6,8 @@
  *   主区: 行 a b c d e | 沟道 | f g h i j   (每列每半区 5 孔连通)
  *   底部电源轨: R3(蓝 -), R4(红 +)
  * DIP 芯片横跨沟道: 引脚 1..n/2 在 e 行自左向右, 引脚 n/2+1..n 在 f 行自右向左
+ * 供电模型: DIP 电源脚 (GND=物理中间脚 / VCC=物理最大脚) 所在列需跳线接通电源轨,
+ *   未上电芯片由引擎强制输出 X; 电源轨视为已接通台式电源
  * ========================================================================= */
 (function (global) {
 'use strict';
@@ -237,15 +239,16 @@ function computeNets(sim, jumpers) {
 
   // 组 → 网编号
   const rootIdx = new Map();
-  const netPins = [], netHoles = [];
+  const netPins = [], netHoles = [], netGroups = [];
   const netIdx = g => {
     const r = find(g);
-    if (!rootIdx.has(r)) { rootIdx.set(r, netPins.length); netPins.push([]); netHoles.push([]); }
+    if (!rootIdx.has(r)) { rootIdx.set(r, netPins.length); netPins.push([]); netHoles.push([]); netGroups.push(new Set()); }
     return rootIdx.get(r);
   };
   const holeNet = new Map();
   const touchGroup = g => {
     const idx = netIdx(g);
+    netGroups[idx].add(g);
     for (const h of groupHoles(g)) { holeNet.set(h, idx); netHoles[idx].push(h); }
   };
   for (const g of nodes) touchGroup(g);
@@ -258,7 +261,7 @@ function computeNets(sim, jumpers) {
       netPins[holeNet.get(h)].push({ chip: ch, pinNum: p.num, hole: h });
     }
   }
-  return { holeNet, netPins, netHoles };
+  return { holeNet, netPins, netHoles, netGroups };
 }
 
 /** 由面包板状态派生引脚↔引脚网表 (每网生成支撑树) */
@@ -272,6 +275,41 @@ function deriveWires(sim, jumpers) {
     }
   }
   return wires;
+}
+
+/* ---------- 供电检查 ---------- */
+/** DIP 电源脚孔位 (标准 74 封装: GND=物理中间脚, VCC=物理最大脚); 非 DIP 返回 null */
+function powerHoles(ch) {
+  if (!ch.bb || ch.bb.kind !== 'dip') return null;
+  const phys = physPins(ch);
+  return { gnd: pinHole(ch, phys / 2), vcc: pinHole(ch, phys) };
+}
+
+/** 网络电源极性: 0 无 / 1 = + / 2 = − / 3 = +−冲突 (看电源轨组或 VCC/GND 源引脚) */
+function netPower(info, idx) {
+  if (!info || idx == null || !info.netGroups[idx]) return 0;
+  let pol = 0;
+  for (const p of info.netPins[idx] || []) {
+    if (p.chip.type === 'VCC') pol |= 1;
+    else if (p.chip.type === 'GND') pol |= 2;
+  }
+  for (const g of info.netGroups[idx]) {
+    if (/:rail:R[14]$/.test(g)) pol |= 1;
+    else if (/:rail:R[23]$/.test(g)) pol |= 2;
+  }
+  return pol;
+}
+
+/** 孔位所在网络的电源极性 (未入网 → 0) */
+function holeNetPower(info, hole) {
+  return info && info.holeNet.has(hole) ? netPower(info, info.holeNet.get(hole)) : 0;
+}
+
+/** 芯片供电判定 (面包板模式): 已放置 DIP 要求 VCC 列带 + 且 GND 列带 −; 其余元件不检查 */
+function chipPowered(info, ch) {
+  if (!ch.bb || ch.bb.kind !== 'dip') return true;
+  const ph = powerHoles(ch);
+  return (holeNetPower(info, ph.vcc) & 1) !== 0 && (holeNetPower(info, ph.gnd) & 2) !== 0;
 }
 
 /* ---------- 自动摆放 ---------- */
@@ -351,6 +389,13 @@ function autoWire(sim, schematicWires) {
     }
     return board + ':' + rail + '-2';
   };
+  // DIP 电源脚所在列整组保留给供电: 信号跳线落入会经电源轨把两个网络短路
+  const pwrBlocked = new Set();
+  for (const ch of sim.chips.values()) {
+    if (!ch.bb || ch.bb.kind !== 'dip') continue;
+    const ph = powerHoles(ch);
+    for (const h of [ph.vcc, ph.gnd]) for (const hk of groupHoles(groupOf(h))) pwrBlocked.add(hk);
+  }
 
   let warn = 0;
   for (const pins of nets.values()) {
@@ -374,14 +419,33 @@ function autoWire(sim, schematicWires) {
         const near = +dst.slice(di + 2) || 8;   // dst = "b:e12" → 列号
         src = railFreeCol(board, rail, near);
       } else {
-        // 在 h0 的连通组内找空闲孔
+        // 在 h0 的连通组内找空闲孔 (避开电源列)
         const holes = groupHoles(groupOf(h0));
-        src = holes.find(h => !used.get(h)) ||
-              holes.find(h => (used.get(h) || 0) < 2) ||
+        src = holes.find(h => !used.get(h) && !pwrBlocked.has(h)) ||
+              holes.find(h => (used.get(h) || 0) < 2 && !pwrBlocked.has(h)) ||
               h0;
         if (src === h0 && (used.get(h0) || 0) >= 2) warn++;
       }
       jumpers.push({ a: src, b: dst });
+      take(src); take(dst);
+    }
+  }
+
+  // 供电跳线: 每颗 DIP 的 VCC/GND 电源脚列 → 电源轨 (电源轨视为已接通台式电源)
+  const occ = occupancy(sim);
+  for (const ch of sim.chips.values()) {
+    if (!ch.bb || ch.bb.kind !== 'dip') continue;
+    const ph = powerHoles(ch);
+    const b = ch.bb.board || 0;
+    for (const [hole, rail] of [[ph.vcc, 'R1'], [ph.gnd, 'R2']]) {
+      const ci = hole.indexOf(':'), rest = hole.slice(ci + 1), col = rest.slice(1);
+      // 上半区列走 a~d 行, 下半区列走 g~j 行 (e/f 行是芯片腿, 不可插线)
+      const rows = ROWS_TOP.includes(rest[0]) ? ['a', 'b', 'c', 'd'] : ['j', 'i', 'h', 'g'];
+      const src = rows.map(r => hole.slice(0, ci + 1) + r + col)
+        .find(h => !used.get(h) && !occ.get(h));
+      if (!src) { warn++; continue; }
+      const dst = railFreeCol(b, rail, +col);
+      jumpers.push({ a: src, b: dst, pwr: true });
       take(src); take(dst);
     }
   }
@@ -393,6 +457,7 @@ const BB = {
   getCols, setCols, getBoards, setBoards, boardY, BOARD_H, BOARD_GAP, totalH,
   colX, holePos, groupOf, groupHoles, physPins, dipSpan, pinHole, chipHoles, chipRect,
   occupancy, dipColsFree, computeNets, deriveWires, autoPlace, autoWire,
+  powerHoles, netPower, holeNetPower, chipPowered,
 };
 global.BB = BB;
 if (typeof module !== 'undefined' && module.exports) module.exports = { BB };

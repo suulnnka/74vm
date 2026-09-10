@@ -229,6 +229,25 @@ console.log('\n[12] 所有示例可加载且可稳定运行');
   check('8 个示例加载+运行 100ms 无异常', ok, bad);
 }
 
+console.log('\n[13] 供电检查: 未上电芯片输出 X');
+{
+  const sim = makeSim();
+  const a = addSwitch(sim, 1);
+  const n = sim.addChip('7400', 0, 0);
+  sim.addWire(a, 1, n, 1);
+  sim.addWire(a, 1, n, 2);
+  check('上电时 NAND(1,1) = 0', V(sim, n, 3) === 0, V(sim, n, 3));
+  n.powered = false;
+  sim.reevalAll();
+  check('未上电 → 输出 X', V(sim, n, 3) === VX, V(sim, n, 3));
+  sim.kick();
+  check('kick 不破坏未上电输出的 X', V(sim, n, 3) === VX, V(sim, n, 3));
+  check('未上电不改变输入引脚呈现', V(sim, n, 1) === 1, V(sim, n, 1));
+  n.powered = true;
+  sim.reevalAll();
+  check('重新上电恢复 NAND(1,1) = 0', V(sim, n, 3) === 0, V(sim, n, 3));
+}
+
 console.log('\n========================================');
 console.log(`结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

@@ -374,5 +374,48 @@ console.log('\n[8] 存储器 (74187 / 74S472 / 74189 / 6116)');
   check('旧 RAM 迁移为 6116 且补零到 2048', mRam.type === '6116' && mRam.props.mem.length === 2048);
 }
 
+console.log('\n[11] 供电: 电源脚孔位 / 自动供电跳线 / 供电判定');
+{
+  const sim = new Engine(LIB);
+  const n = sim.addChip('7400', 0, 0);   // 14 脚: GND=7, VCC=14
+  BB.autoPlace(sim);                     // col=1
+  const ph = BB.powerHoles(n);
+  check('VCC 脚 → 0:f1, GND 脚 → 0:e7', ph.vcc === '0:f1' && ph.gnd === '0:e7', ph);
+
+  const r = BB.autoWire(sim, []);
+  const pwr = r.jumpers.filter(j => j.pwr);
+  check('每颗 DIP 生成 2 根供电跳线', pwr.length === 2, pwr.length);
+  check('供电跳线一端在电源轨', pwr.every(j => /:R[12]-/.test(j.b)), pwr);
+  check('供电跳线不落在芯片腿行 e/f', pwr.every(j => !/^[01]:[ef]/.test(j.a)), pwr);
+
+  let info = BB.computeNets(sim, r.jumpers);
+  check('VCC 列带 + (极性 1)', (BB.holeNetPower(info, ph.vcc) & 1) === 1, BB.holeNetPower(info, ph.vcc));
+  check('GND 列带 − (极性 2)', (BB.holeNetPower(info, ph.gnd) & 2) === 2, BB.holeNetPower(info, ph.gnd));
+  check('chipPowered = true', BB.chipPowered(info, n) === true);
+
+  // 去掉供电跳线 → 未上电; IO 元件不做供电检查
+  info = BB.computeNets(sim, r.jumpers.filter(j => !j.pwr));
+  check('移除供电跳线后 chipPowered = false', BB.chipPowered(info, n) === false);
+  check('IO 元件不做供电检查', BB.chipPowered(info, sim.addChip('LED', 0, 0)) === true);
+
+  // 网表等价性不受供电跳线影响 (电源网络无引脚, 不派生导线)
+  const b = EXAMPLES[2].build();
+  const sim2 = new Engine(LIB);
+  sim2.load({ chips: b.chips, wires: b.wires });
+  const before = partition(sim2.wiresRaw());
+  BB.autoPlace(sim2);
+  const r2 = BB.autoWire(sim2, sim2.wiresRaw());
+  const part = partition(BB.deriveWires(sim2, r2.jumpers));
+  check('含供电跳线时网表仍等价', JSON.stringify(before) === JSON.stringify(part));
+
+  // 面包板全流程: 供电后半加器芯片正常工作
+  sim2.setWiresRaw(BB.deriveWires(sim2, r2.jumpers));
+  const info2 = BB.computeNets(sim2, r2.jumpers);
+  for (const c of sim2.chips.values()) c.powered = BB.chipPowered(info2, c);
+  const xor = Array.from(sim2.chips.values()).find(c => c.type === '7486');
+  check('半加器芯片上电', xor.powered === true);
+  check('上电后输出确定', sim2.pinDisplay(xor.pinByNum[3]) !== 'X', sim2.pinDisplay(xor.pinByNum[3]));
+}
+
 console.log(`结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);
