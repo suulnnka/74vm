@@ -1068,7 +1068,7 @@ canvas.addEventListener('contextmenu', e => {
   if (ch) {
     const items = [];
     if (!LIB[ch.type].fixedRot) items.push({ text: '旋转 90° (R)', fn: () => rotateChip(ch) });
-    items.push({ text: '编辑标签…', fn: () => editLabel(ch) });
+    items.push({ text: ch.type === 'CLOCK' ? '编辑频率…' : '编辑标签…', fn: () => editLabelOrFreq(ch) });
     items.push({ text: '复制 (Ctrl+D)', fn: () => duplicateSelection() });
     items.push({ text: '删除 (Del)', fn: () => deleteChip(ch) });
     showCtxMenu(e.clientX, e.clientY, items);
@@ -1098,10 +1098,16 @@ function rotateChip(ch) {
   scheduleSave();
 }
 function editLabel(ch) {
-  const s = prompt('元件标签 (留空清除):', ch.props.label || '');
-  if (s == null) return;
-  ch.props.label = s.trim();
-  sim.touch(); scheduleSave();
+  Dialog.prompt({
+    title: '编辑标签 — ' + ch.type,
+    label: '元件标签 (留空清除):',
+    value: ch.props.label || '',
+    placeholder: '例如 CLK / ~RESET',
+  }).then(s => {
+    if (s == null) return;
+    ch.props.label = s.trim();
+    sim.touch(); scheduleSave();
+  });
 }
 function deleteChip(ch) {
   pushUndo();
@@ -1361,8 +1367,12 @@ function deleteDispatch() {
   else if (app.mode === 'breadboard') bbDeleteSelection();
   else pcbDeleteSelection();
 }
-function fileNew() {
-  if (sim.chips.size && !confirm('清空当前电路? (可用 Ctrl+Z 撤销)')) return;
+async function fileNew() {
+  if (sim.chips.size && !(await Dialog.confirm({
+    title: '新建画布',
+    message: '清空当前电路? (可用 Ctrl+Z 撤销)',
+    okText: '清空', danger: true,
+  }))) return;
   pushUndo();
   restoreSave({ chips: [], wires: [] });
   doSave(true);
@@ -1413,10 +1423,18 @@ function bbActDelBoard() {
   toast('已移除一块板 (剩 ' + BB.getBoards() + ' 块)' + (rm ? '，' + rm + ' 个元件移回托盘' : ''));
   Menus.refresh();
 }
-function bbActCols() {
-  const s = prompt('面包板列数 (20 ~ 240)\n常见: 30 = 半尺寸, 60 = 全尺寸, 63 = 常见规格:', String(BB.getCols()));
-  if (s == null) return;
-  const n = parseInt(s, 10);
+async function bbActCols() {
+  const ok = await Dialog.prompt({
+    title: '面包板列数',
+    label: '列数 (20 ~ 240)。常见: 30 = 半尺寸, 60 = 全尺寸, 63 = 常见规格:',
+    value: String(BB.getCols()),
+    validate: s => {
+      const n = parseInt(s, 10);
+      return (isNaN(n) || n < 20 || n > 240) ? '请输入 20 ~ 240 之间的整数' : null;
+    },
+  });
+  if (ok == null) return;
+  const n = parseInt(ok, 10);
   if (isNaN(n) || n < 20 || n > 240) { toast('无效列数 (需 20~240)', 'err'); return; }
   pushUndo();
   const n0 = Array.from(sim.chips.values()).filter(c => c.bb).length;
@@ -1431,9 +1449,13 @@ function pcbActAuto() {
   pushUndo(); PCB.autoPlace(sim); scheduleSave();
   toast('已自动布局'); Menus.refresh();
 }
-function pcbActExport() {
+async function pcbActExport() {
   const unplaced = Array.from(sim.chips.values()).filter(c => !c.pcb);
-  if (unplaced.length && !confirm(unplaced.length + ' 个元件尚未布局, 导出将忽略它们. 继续?')) return;
+  if (unplaced.length && !(await Dialog.confirm({
+    title: '导出立创EDA PCB',
+    message: unplaced.length + ' 个元件尚未布局, 导出将忽略它们. 继续?',
+    okText: '导出',
+  }))) return;
   const r = EasyEDAExport.buildEasyEDA(sim, PCB);
   downloadBlob(r.json, '74vm-pcb-easyeda.json');
   toast('已导出立创EDA PCB — 在立创EDA(标准版) 文件→导入→EasyEDA 打开, 焊盘带网络可直接自动布线');
@@ -1805,9 +1827,13 @@ function applyBB() {
   app.bb.netInfo = BB.computeNets(sim, app.bb.jumpers);
 }
 
-function bbAutoAll(interactive) {
+async function bbAutoAll(interactive) {
   if (interactive && app.bb.jumpers.length &&
-      !confirm('重新自动布线将覆盖现有 ' + app.bb.jumpers.length + ' 根跳线, 继续?')) return;
+      !(await Dialog.confirm({
+        title: '重新自动布线',
+        message: '重新自动布线将覆盖现有 ' + app.bb.jumpers.length + ' 根跳线, 继续?',
+        okText: '覆盖重布',
+      }))) return;
   pushUndo();
   BB.autoPlace(sim);
   const r = BB.autoWire(sim, app.schematicWires || []);
@@ -2204,14 +2230,22 @@ function bbRotateSelection() {
 
 function editLabelOrFreq(ch) {
   if (ch.type === 'CLOCK') {
-    const s = prompt('时钟频率 (Hz, 0.1 ~ 20000):', ch.props.freq || 2);
-    if (s == null) return;
-    const f = parseFloat(s);
-    if (isNaN(f) || f < 0.1 || f > 20000) { toast('无效频率', 'err'); return; }
-    ch.props.freq = f;
-    ch.state.nextT = sim.simTime + sim.clockHalf(ch);
-    sim.touch(); scheduleSave();
-    toast('时钟已设为 ' + f + ' Hz');
+    Dialog.prompt({
+      title: '时钟频率 — CLOCK',
+      label: '时钟频率 (Hz, 0.1 ~ 20000):',
+      value: String(ch.props.freq || 2),
+      validate: s => {
+        const f = parseFloat(s);
+        return (isNaN(f) || f < 0.1 || f > 20000) ? '请输入 0.1 ~ 20000 之间的数字' : null;
+      },
+    }).then(s => {
+      if (s == null) return;
+      const f = parseFloat(s);
+      ch.props.freq = f;
+      ch.state.nextT = sim.simTime + sim.clockHalf(ch);
+      sim.touch(); scheduleSave();
+      toast('时钟已设为 ' + f + ' Hz');
+    });
   } else {
     editLabel(ch);
   }

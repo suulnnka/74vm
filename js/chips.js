@@ -483,7 +483,7 @@ def('BTN', '按键(按住=1)', '输入/输出', [R(1, 'Q', 'out')], {
   init(ch) { ch.pinByNum[1].driven = 0; },
 });
 
-def('CLOCK', '时钟源(双击改频率)', '输入/输出', [R(1, 'CLK', 'out')], {
+def('CLOCK', '时钟源(右键改频率)', '输入/输出', [R(1, 'CLK', 'out')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 112, h: 56 },
   defaults: { freq: 2 },
   init(ch) { ch.state.phase = ch.state.phase || 0; ch.pinByNum[1].driven = ch.state.phase ? 1 : 0; },
