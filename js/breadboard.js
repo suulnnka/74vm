@@ -17,6 +17,7 @@ const LIB_isIO = t => { const d = LIBREF()[t]; return !!(d && d.custom); };
 const LIB_isPower = t => t === 'VCC' || t === 'GND';
 
 const PITCH = 16;          // 孔距 (世界像素)
+const ROW_IO_W = 18;   // IO 元件端部占位: 一个孔宽 (含 2px 边距)
 let COLS = 60;             // 列数 (可通过 setCols 自定义, 20~240)
 const ROWS_TOP = ['a', 'b', 'c', 'd', 'e'];
 const ROWS_BOT = ['f', 'g', 'h', 'i', 'j'];
@@ -166,16 +167,20 @@ function chipRect(ch) {
     const n = Math.max(1, ch.pins.length);
     const p0 = holePos((bb.board || 0) + ':' + bb.row + bb.col);
     if (!p0) return null;
-    const w = (n - 1) * PITCH + 28;   // 收窄: 不再多占一整列
+    // 宽度 = (n-1) 列距 + 端部一个孔宽 (18): 相邻孔位仍可放其他 IO 元件
+    const w = (n - 1) * PITCH + ROW_IO_W;
     const cx = colX(bb.col) + (n - 1) * PITCH / 2;
     // 上半区(a-e): 盒在孔上方; 下半区(f-j): 盒在孔下方(腿朝上), 不遮中央沟道/DIP
+    // 单脚元件盒 18×18 近方形
     const lower = ROWS_BOT.includes(bb.row);
-    return { x: cx - w / 2, y: lower ? p0.y - 10 : p0.y - 34, w, h: 44 };
+    const bh = n === 1 ? ROW_IO_W : 26;
+    const boxY = lower ? p0.y + 8 : p0.y - 8 - bh;
+    return { x: cx - w / 2, y: lower ? p0.y - 8 : boxY, w, h: bh + 8 };
   }
   const p = holePos((bb.board || 0) + ':' + bb.rail + '-' + bb.col);
   if (!p) return null;
   const top = bb.rail === 'R1' || bb.rail === 'R2';
-  return { x: p.x - PITCH, y: top ? p.y - 28 : p.y - 2, w: PITCH * 2, h: 30 };
+  return { x: p.x - ROW_IO_W / 2, y: top ? p.y - 26 : p.y - 6, w: ROW_IO_W, h: 24 };
 }
 
 /** 孔位占用: holeKey → {chip, pinNum} */
@@ -305,8 +310,10 @@ function holeNetPower(info, hole) {
   return info && info.holeNet.has(hole) ? netPower(info, info.holeNet.get(hole)) : 0;
 }
 
-/** 芯片供电判定 (面包板模式): 已放置 DIP 要求 VCC 列带 + 且 GND 列带 −; 其余元件不检查 */
+/** 芯片供电判定 (面包板模式): 已放置 DIP 要求 VCC 列带 + 且 GND 列带 −;
+ *  虚拟/抽象元件 (custom: 开关/按键/时钟/LED/探针/PS2/VCC/GND…) 本身无电源概念, 一律不检查 */
 function chipPowered(info, ch) {
+  if (LIB_isIO(ch.type)) return true;
   if (!ch.bb || ch.bb.kind !== 'dip') return true;
   const ph = powerHoles(ch);
   return (holeNetPower(info, ph.vcc) & 1) !== 0 && (holeNetPower(info, ph.gnd) & 2) !== 0;
@@ -453,7 +460,7 @@ function autoWire(sim, schematicWires) {
 }
 
 const BB = {
-  PITCH, ROWS_TOP, ROWS_BOT, RAILS, ROW_Y, BOARD, CHANNEL_Y,
+  PITCH, ROW_IO_W, ROWS_TOP, ROWS_BOT, RAILS, ROW_Y, BOARD, CHANNEL_Y,
   getCols, setCols, getBoards, setBoards, boardY, BOARD_H, BOARD_GAP, totalH,
   colX, holePos, groupOf, groupHoles, physPins, dipSpan, pinHole, chipHoles, chipRect,
   occupancy, dipColsFree, computeNets, deriveWires, autoPlace, autoWire,

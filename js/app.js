@@ -2756,12 +2756,13 @@ function drawBBChip(ch, z) {
       }
     }
   } else if (ch.bb.kind === 'row') {
-    // IO 模块: 上半区盒在孔上方; 下半区(f-j)盒在孔下方, 腿朝上连孔
+    // IO 模块: 窄盒 (端部一个孔宽, 单脚元件近方形); 上半区盒在孔上方, 下半区盒在孔下方
     const lower = B.ROWS_BOT.includes(ch.bb.row);
-    const boxY = lower ? rect.y + 18 : rect.y;
-    const legEnd = lower ? boxY : rect.y + 26;   // 腿靠盒一端
+    const bh = ch.pins.length === 1 ? B.ROW_IO_W : 26;
+    const boxY = lower ? rect.y + 8 : rect.y;
+    const legEnd = lower ? boxY : rect.y + bh;   // 腿靠盒一端
     ctx.fillStyle = '#242c36';
-    rr(rect.x, boxY, rect.w, 26, 5);
+    rr(rect.x, boxY, rect.w, bh, 5);
     ctx.fill();
     ctx.strokeStyle = sel ? COL.sel : (hov ? '#7c8b9c' : '#454e59');
     ctx.lineWidth = sel ? 1.8 : 1.2;
@@ -2774,24 +2775,36 @@ function drawBBChip(ch, z) {
       const hp = B.holePos(h);
       if (hp) { ctx.beginPath(); ctx.moveTo(hp.x, hp.y); ctx.lineTo(hp.x, legEnd); ctx.stroke(); }
     }
-    drawIOGlyph(ch, rect.x + rect.w / 2, boxY + 13);
+    drawIOGlyph(ch, rect.x + rect.w / 2, boxY + bh / 2);
+    // 标识 (盒外侧, 带描边; 关闭时悬停显示)
+    if (ch.props.label && ch.type !== 'SEG7' && (app.bbLabels || (app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id))) {
+      const lx = rect.x + rect.w / 2;
+      const ly = lower ? boxY + bh + 9 : boxY - 9;
+      ctx.font = 'bold 8px Consolas, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.strokeText(ch.props.label, lx, ly);
+      ctx.fillStyle = COL.label;
+      ctx.fillText(ch.props.label, lx, ly);
+    }
     // 打字聚焦指示 (虚线外框)
     if (app.kbChip === ch) {
       ctx.setLineDash([4, 3]);
       ctx.strokeStyle = COL.sel; ctx.lineWidth = 1.6;
-      rr(rect.x - 3, boxY - 3, rect.w + 6, 32, 6);
+      rr(rect.x - 3, boxY - 3, rect.w + 6, bh + 6, 6);
       ctx.stroke();
       ctx.setLineDash([]);
     }
   } else {
-    // 电源轨上的 VCC/GND
+    // 电源轨上的 VCC/GND (一个孔宽)
     const p = B.holePos((ch.bb.board || 0) + ':' + ch.bb.rail + '-' + ch.bb.col);
     const top = ch.bb.rail === 'R1' || ch.bb.rail === 'R2';
-    const boxY = top ? rect.y + 2 : rect.y + 10;
+    const boxY = top ? rect.y : rect.y + 6;
     ctx.strokeStyle = '#8ba0b6';
     ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.moveTo(p.x, top ? boxY + 18 : rect.y + 2);
+    ctx.moveTo(p.x, top ? rect.y + 18 : rect.y + 6);
     ctx.lineTo(p.x, p.y);
     ctx.stroke();
     ctx.fillStyle = '#242c36';
@@ -2801,7 +2814,7 @@ function drawBBChip(ch, z) {
     ctx.lineWidth = sel ? 1.8 : 1.4;
     ctx.stroke();
     ctx.fillStyle = ch.type === 'VCC' ? '#ff8a80' : '#8ba0b6';
-    ctx.font = 'bold 9px Consolas, monospace';
+    ctx.font = 'bold 8px Consolas, monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(ch.type, rect.x + rect.w / 2, boxY + 9);
   }
@@ -2813,46 +2826,46 @@ function drawIOGlyph(ch, cx, cy) {
   switch (ch.type) {
     case 'SW': {
       const on = !!ch.state.on;
-      rr(cx - 13, cy - 5, 26, 10, 5);
+      rr(cx - 7.5, cy - 4, 15, 8, 4);
       ctx.fillStyle = on ? 'rgba(46,230,107,.3)' : '#171d24';
       ctx.fill();
       ctx.strokeStyle = on ? COL.v1 : '#46545f';
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(on ? cx + 7 : cx - 7, cy, 4, 0, Math.PI * 2);
+      ctx.arc(on ? cx + 3.5 : cx - 3.5, cy, 2.8, 0, Math.PI * 2);
       ctx.fillStyle = on ? COL.v1 : '#8a97a5';
       ctx.fill();
       break;
     }
     case 'BTN': {
       const on = ch.pins[0].driven === 1;
-      ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-      ctx.strokeStyle = on ? COL.v1 : '#46545f'; ctx.lineWidth = 1.4; ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      ctx.strokeStyle = on ? COL.v1 : '#46545f'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, 2.6, 0, Math.PI * 2);
       ctx.fillStyle = on ? COL.v1 : '#a8b4c0'; ctx.fill();
       break;
     }
     case 'CLOCK': {
       const ph = ch.state.phase ? 1 : 0;
       ctx.strokeStyle = ph ? COL.v1 : '#0288d1';
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.moveTo(cx - 14, cy - 4); ctx.lineTo(cx - 9, cy - 4); ctx.lineTo(cx - 9, cy - 8);
-      ctx.lineTo(cx - 2, cy - 8); ctx.lineTo(cx - 2, cy - 4); ctx.lineTo(cx + 5, cy - 4);
-      ctx.lineTo(cx + 5, cy - 8); ctx.lineTo(cx + 12, cy - 8); ctx.lineTo(cx + 12, cy - 4);
-      ctx.lineTo(cx + 15, cy - 4);
+      ctx.moveTo(cx - 8, cy - 4); ctx.lineTo(cx - 5, cy - 4); ctx.lineTo(cx - 5, cy - 9);
+      ctx.lineTo(cx - 1, cy - 9); ctx.lineTo(cx - 1, cy - 4); ctx.lineTo(cx + 3, cy - 4);
+      ctx.lineTo(cx + 3, cy - 9); ctx.lineTo(cx + 7, cy - 9); ctx.lineTo(cx + 7, cy - 4);
+      ctx.lineTo(cx + 9, cy - 4);
       ctx.stroke();
       ctx.fillStyle = '#43566a';
-      ctx.font = '6.5px Consolas, monospace';
-      ctx.fillText((ch.props.freq || 2) + 'Hz', cx, cy + 6);
+      ctx.font = '6px Consolas, monospace';
+      ctx.fillText((ch.props.freq || 2) + 'Hz', cx, cy + 7);
       break;
     }
     case 'LED': {
       const v = pinValue(ch.pins[0]);
       const on = v === 1;
       if (on) { ctx.shadowColor = '#ff3b3b'; ctx.shadowBlur = 12; }
-      ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
       ctx.fillStyle = on ? '#ff4d4d' : '#3a2226';
       ctx.fill();
       ctx.shadowBlur = 0;
@@ -2882,7 +2895,7 @@ function drawIOGlyph(ch, cx, cy) {
     }
     case 'PROBE': {
       const v = pinValue(ch.pins[0]);
-      ctx.font = 'bold 11px Consolas, monospace';
+      ctx.font = 'bold 10px Consolas, monospace';
       ctx.fillStyle = valColor(v);
       ctx.fillText(v === 'Z' ? 'Z' : String(v), cx, cy);
       break;
@@ -2891,28 +2904,17 @@ function drawIOGlyph(ch, cx, cy) {
       // 迷你键盘 (发送中描边变绿)
       const on = !!(ch._ps2 && ch._ps2.active);
       ctx.fillStyle = '#e8edf3';
-      rr(cx - 13, cy - 7, 26, 14, 2); ctx.fill();
+      rr(cx - 8, cy - 5, 16, 10, 2); ctx.fill();
       ctx.strokeStyle = on ? COL.v1 : '#46545f'; ctx.lineWidth = 1; ctx.stroke();
       ctx.fillStyle = '#8a97a5';
-      for (let r2 = 0; r2 < 3; r2++) for (let c = 0; c < 6; c++)
-        ctx.fillRect(cx - 10 + c * 4, cy - 4 + r2 * 4, 3, 3);
+      for (let r2 = 0; r2 < 3; r2++) for (let c = 0; c < 5; c++)
+        ctx.fillRect(cx - 6.5 + c * 2.8, cy - 3.5 + r2 * 2.8, 2, 2);
       break;
     }
     default:
       ctx.fillStyle = '#43566a';
-      ctx.font = '9px Consolas, monospace';
+      ctx.font = '8px Consolas, monospace';
       ctx.fillText(ch.type, cx, cy);
-  }
-  if (ch.props.label && ch.type !== 'SEG7') {
-    // 关闭标识时: 仅鼠标悬停该元件才显示
-    if (!app.bbLabels && !(app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id)) return;
-    ctx.font = 'bold 8px Consolas, monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,255,255,.9)';   // 浅色描边: 米黄板面/深色盒上都清晰
-    ctx.strokeText(ch.props.label, cx, cy + 15);
-    ctx.fillStyle = COL.label;
-    ctx.fillText(ch.props.label, cx, cy + 15);
   }
 }
 

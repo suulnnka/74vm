@@ -218,7 +218,7 @@ console.log('\n[8] 自定义尺寸与模块矩形按格对齐');
   const r2 = BB.chipRect(seg);
   const cx = BB.colX(3) + 7 * BB.PITCH / 2;   // 8脚跨度中心
   check('SEG7 模块居中于引脚跨度', Math.abs(r2.x + r2.w / 2 - cx) < 1e-9, [r2.x + r2.w / 2, cx]);
-  check('SEG7 宽 = (8-1)×孔距+28', r2.w === 7 * BB.PITCH + 28, r2.w);
+  check('SEG7 宽 = (8-1)×孔距+18 (端部一个孔宽)', r2.w === 7 * BB.PITCH + BB.ROW_IO_W, r2.w);
   check('SEG7 引脚腿都在模块水平范围内', seg.pins.every(p => {
     const hp = BB.holePos(BB.pinHole(seg, p.num));
     return hp.x >= r2.x && hp.x <= r2.x + r2.w;
@@ -226,11 +226,11 @@ console.log('\n[8] 自定义尺寸与模块矩形按格对齐');
   const led = sim.addChip('LED', 0, 0);
   led.bb = { kind: 'row', board: 0, row: 'a', col: 40 };
   const r3 = BB.chipRect(led);
-  check('单脚模块宽 = 28px (不占邻列)', r3.w === 28, r3.w);
+  check('单脚模块宽 = 18px (一个孔宽, 近方形)', r3.w === BB.ROW_IO_W && r3.h === BB.ROW_IO_W + 8, r3.w);
   const vcc = sim.addChip('VCC', 0, 0);
   vcc.bb = { kind: 'rail', board: 0, rail: 'R1', col: 10 };
   const r4 = BB.chipRect(vcc);
-  check('电源轨模块宽 = 2×孔距 且居中于孔', r4.w === 2 * BB.PITCH && Math.abs(r4.x + r4.w / 2 - BB.colX(10)) < 1e-9);
+  check('电源轨模块宽 = 一个孔宽 且居中于孔', r4.w === BB.ROW_IO_W && Math.abs(r4.x + r4.w / 2 - BB.colX(10)) < 1e-9);
 }
 
 console.log('\n[9] 多块面包板 (纵向排列)');
@@ -393,10 +393,18 @@ console.log('\n[11] 供电: 电源脚孔位 / 自动供电跳线 / 供电判定'
   check('GND 列带 − (极性 2)', (BB.holeNetPower(info, ph.gnd) & 2) === 2, BB.holeNetPower(info, ph.gnd));
   check('chipPowered = true', BB.chipPowered(info, n) === true);
 
-  // 去掉供电跳线 → 未上电; IO 元件不做供电检查
+  // 去掉供电跳线 → 未上电; 虚拟 IO 元件不做供电检查 (按元件性质豁免, 与放置形态无关)
   info = BB.computeNets(sim, r.jumpers.filter(j => !j.pwr));
   check('移除供电跳线后 chipPowered = false', BB.chipPowered(info, n) === false);
-  check('IO 元件不做供电检查', BB.chipPowered(info, sim.addChip('LED', 0, 0)) === true);
+  const io = sim.addChip('LED', 0, 0);
+  io.bb = { kind: 'dip', board: 0, col: 40, flip: false };   // 虚拟元件即使摆成 DIP 也不检查
+  check('虚拟 IO 元件不做供电检查 (含 DIP 形态)', BB.chipPowered(info, io) === true);
+  check('全部单脚虚拟元件均豁免',
+    ['SW', 'BTN', 'CLOCK', 'PROBE', 'VCC', 'GND', 'PS2'].every(t => {
+      const c = sim.addChip(t, 0, 0);
+      c.bb = { kind: 'dip', board: 0, col: 45, flip: false };
+      return BB.chipPowered(info, c) === true;
+    }));
 
   // 网表等价性不受供电跳线影响 (电源网络无引脚, 不派生导线)
   const b = EXAMPLES[2].build();
