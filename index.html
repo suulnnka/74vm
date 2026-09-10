@@ -50,6 +50,7 @@
         <li><b>旋转</b>：选中后按 <kbd>R</kbd> 或右键菜单。<b>删除</b>：<kbd>Del</kbd> / 右键菜单。</li>
         <li><b>开关 / 按键</b>：单击切换 / 按住导通。<b>标签 / 时钟频率</b>：右键元件 → <b>编辑标签…</b>。</li>
         <li><b>PS/2 键盘</b>：<b>单击元件聚焦后直接打字</b>，按键按标准 PS/2 协议（Set 2 扫描码）从 CLK/DATA 串行发出：按下发 Make 码、松开发 Break 码（0xF0 + 码），扩展键（方向键等）前缀 0xE0；帧 = 起始位 + 8 数据位（LSB 在前）+ 奇校验 + 停止位，自产 ~16.7kHz 时钟，下降沿时数据稳定。<kbd>Esc</kbd> 或点击空白退出打字；可接 74164 / 7474 等搭建扫描码解码电路。</li>
+        <li><b>1602 液晶</b>：RS + E + 8 位数据 (HD44780 风格，RW 接地)。E 上升沿锁存；指令 0x01 清屏、0x02 回 home、0x80|n 设地址 (两行 0x00/0x40 起)；数据支持 ASCII 与 GB2312 双字节中文。右键可编辑显示文本 (等宽字体渲染) / 清屏。</li>
         <li><b>存储器</b>：<b>74187</b> ROM 256×4、<b>74S472</b> PROM 512×8（右键 → 编辑内容 / 导出，十六进制可粘贴导入）；<b>74189</b> RAM 16×4、<b>6116</b> SRAM 2K×8（右键 → 获取快照 / 导出）。/CE、/CS、/WE、/OE 低有效，地址悬空按 0。</li>
       </ul>
       <h4>电平与颜色</h4>
@@ -83,13 +84,13 @@
   </div>
 </div>
 <input type="file" id="fileImport" accept=".json,application/json" hidden>
-<script src="js/engine.js?v=48"></script>
-<script src="js/chips.js?v=48"></script>
-<script src="js/examples.js?v=48"></script>
-<script src="js/breadboard.js?v=48"></script>
-<script src="js/pcb.js?v=48"></script>
-<script src="js/easyeda.js?v=48"></script>
-<script src="js/dialog.js?v=48"></script>
-<script src="js/app.js?v=48"></script>
+<script src="js/engine.js?v=49"></script>
+<script src="js/chips.js?v=49"></script>
+<script src="js/examples.js?v=49"></script>
+<script src="js/breadboard.js?v=49"></script>
+<script src="js/pcb.js?v=49"></script>
+<script src="js/easyeda.js?v=49"></script>
+<script src="js/dialog.js?v=49"></script>
+<script src="js/app.js?v=49"></script>
 </body>
 </html>

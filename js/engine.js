@@ -448,10 +448,10 @@ class Engine {
     const target = this.simTime + dtUs;
     for (let guard = 0; guard < 2000000; guard++) {
       this.processQueue(target, this.FRAME_CAP);
-      // 找最早到期的时钟
+      // 找最早到期的时钟 (未供电的时钟不振荡)
       let c = null, best = Infinity;
       for (const ch of this.chips.values()) {
-        if (ch.type !== 'CLOCK') continue;
+        if (ch.type !== 'CLOCK' || ch.powered === false) continue;
         if (ch.state.nextT == null)
           ch.state.nextT = this.simTime + this.clockHalf(ch);
         if (ch.state.nextT < best) { best = ch.state.nextT; c = ch; }
@@ -467,7 +467,7 @@ class Engine {
   stepClocks() {
     let fired = 0;
     for (const ch of this.chips.values()) {
-      if (ch.type !== 'CLOCK') continue;
+      if (ch.type !== 'CLOCK' || ch.powered === false) continue;
       this.fireClock(ch);
       fired++;
     }

@@ -439,7 +439,7 @@ function drawIO(ch, def, z) {
       ctx.font = '10px Consolas, monospace';
       ctx.fillStyle = '#43566a';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText((ch.props.freq || 2) + ' Hz', 0, half.y - 9);
+      ctx.fillText(fmtFreq(ch.props.freq || 2), 0, half.y - 9);
       break;
     }
     case 'LED': {
@@ -553,6 +553,41 @@ function drawIO(ch, def, z) {
       ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
       ctx.fillStyle = focused ? COL.sel : '#6b7a8c';
       ctx.fillText(focused ? '输入中… Esc 退出' : '点击后打字', 0, half.y - 7);
+      break;
+    }
+    case 'LCD1602': {
+      // 液晶面板: 蓝底白字, 等宽字体渲染 (非点阵)
+      const px = -half.x + 10, py = -half.y + 10, pw = w - 20, ph = h - 20;
+      ctx.fillStyle = '#0d47a1';
+      rr(px, py, pw, ph, 4);
+      ctx.fill();
+      ctx.strokeStyle = '#093170';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      const dd = ch.state.ddram || [];
+      const cw = pw / 16, band = (ph - 24) / 2;
+      ctx.font = '12px Consolas, "Microsoft YaHei", monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (let row = 0; row < 2; row++) {
+        const y = py + 12 + band * row + band / 2;
+        const base = row === 0 ? 0 : 0x40;
+        ctx.fillStyle = 'rgba(227,242,253,.14)';   // 单元格微光带
+        ctx.fillRect(px + 2, y - band / 2 + 3, pw - 4, band - 6);
+        ctx.fillStyle = '#e3f2fd';
+        for (let c = 0; c < 16; c++) {
+          const t = dd[base + c];
+          if (t && t !== ' ') ctx.fillText(t, px + cw * (c + 0.5), y);
+        }
+      }
+      // 光标 (下划线, 仅可见区)
+      const cur = ch.state.cur || 0;
+      if (cur < 16 || (cur >= 0x40 && cur < 0x50)) {
+        const row = cur >= 0x40 ? 1 : 0;
+        const ccol = cur >= 0x40 ? cur - 0x40 : cur;
+        const y = py + 12 + band * row + band / 2 + band / 2 - 5;
+        ctx.fillStyle = '#e3f2fd';
+        ctx.fillRect(px + cw * ccol + 1, y, cw - 2, 2);
+      }
       break;
     }
     case 'VCC': {
@@ -857,7 +892,7 @@ function bbSanitize() {
     if (bb.kind === 'dip') {
       if (bb.col + BB.dipSpan(ch) - 1 > cols) ch.bb = null;
     } else if (bb.kind === 'row') {
-      if (bb.col + Math.max(1, ch.pins.length) - 1 > cols) ch.bb = null;
+      if (bb.col + BB.legCount(ch) - 1 > cols) ch.bb = null;
     } else if (bb.col > cols) ch.bb = null;
   }
   const ok = app.bb.jumpers.filter(j => BB.holePos(j.a) && BB.holePos(j.b));
@@ -1166,7 +1201,8 @@ canvas.addEventListener('contextmenu', e => {
   if (ch) {
     const items = [];
     items.push({ text: '旋转 90° (R)', fn: () => rotateChip(ch) });
-    items.push({ text: ch.type === 'CLOCK' ? '编辑频率…' : '编辑标签…', fn: () => editLabelOrFreq(ch) });
+    if (ch.type === 'CLOCK') items.push({ text: '编辑频率…', fn: () => editLabelOrFreq(ch) });
+    items.push({ text: '编辑标签…', fn: () => editLabel(ch) });
     if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? '退出打字 (Esc)' : '聚焦打字…', fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
     items.push(...memoryMenuItems(ch));
     items.push({ text: '复制 (Ctrl+D)', fn: () => duplicateSelection() });
@@ -1894,7 +1930,7 @@ function updateStatus() {
   if (app.mode === 'breadboard') {
     let n = 0;
     for (const ch of sim.chips.values())
-      if (ch.bb && ch.bb.kind === 'dip' && ch.powered === false) n++;
+      if (ch.bb && ch.powered === false) n++;   // DIP 与有源虚拟元件 (CLOCK/PS2)
     if (n) wtxt += (wtxt ? '  ·  ' : '') + '⚡ ' + n + ' 颗芯片未接电源 (VCC/GND 列 → 电源轨)';
   }
   const warn = document.getElementById('stWarn');
@@ -2175,7 +2211,7 @@ function bbPlaceNew(ch, wx, wy) {
     }
     ch.bb = { kind: 'dip', board, col, flip: false };
   } else {
-    const n = Math.max(1, ch.pins.length);
+    const n = BB.legCount(ch);
     let col = Math.max(1, Math.min(BB.getCols() - n + 1, Math.round((wx - BB.colX(1)) / BB.PITCH) + 1));
     const occ = BB.occupancy(sim);
     for (; col + n - 1 <= BB.getCols(); col++) {
@@ -2239,7 +2275,7 @@ function bbSetPos(ch, w) {
     }
     ch.bb = { kind: 'rail', board, rail: best.id, col };
   } else {
-    const n = Math.max(1, ch.pins.length);
+    const n = BB.legCount(ch);
     const oy = BB.boardY(board);
     // 按 y 距离排序行, 目标行被占用时尝试邻近行 (±2 行内找全空闲的行)
     const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
@@ -2402,7 +2438,12 @@ function bbContextMenu(e) {
     selectOnly('chip', ch.id);
     const items = [];
     if (!LIB[ch.type].custom) items.push({ text: '翻转 180° (R)', fn: () => bbFlip(ch) });
-    items.push({ text: '编辑标签…', fn: () => editLabelOrFreq(ch) });
+    if (ch.type === 'CLOCK') {
+      items.push({ text: '编辑频率…', fn: () => editLabelOrFreq(ch) });
+      items.push({ text: '编辑标签…', fn: () => editLabel(ch) });
+    } else {
+      items.push({ text: '编辑标签…', fn: () => editLabelOrFreq(ch) });
+    }
     if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? '退出打字 (Esc)' : '聚焦打字…', fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
     items.push(...memoryMenuItems(ch));
     items.push({ text: '移出面包板 (Del)', fn: () => bbUnplace(ch) });
@@ -2522,8 +2563,51 @@ function exportMem(ch) {
   downloadBlob(memToHex(ch.props.mem || []), fn);
   toast('已导出 ' + fn);
 }
-/** 右键菜单追加项: ROM 类编辑/导出, RAM 类快照/导出 (按 mem 配置识别) */
+/** LCD1602: 编辑显示文本 / 清屏 */
+function lcdLinesText(ch) {
+  const dd = ch.state.ddram || [];
+  const l1 = dd.slice(0, 16).join('').replace(/\s+$/, '');
+  const l2 = dd.slice(0x40, 0x50).join('').replace(/\s+$/, '');
+  return l1 + '\n' + l2;
+}
+function editLcdText(ch) {
+  Dialog.prompt({
+    title: '1602 显示文本 — ' + memChipName(ch),
+    label: '共 2 行, 每行最多 16 个字符 (支持中文):',
+    value: lcdLinesText(ch),
+    multiline: true, rows: 4,
+    okText: '显示',
+    validate: s => {
+      const ls = s.split('\n');
+      if (ls.length > 2) return '最多 2 行';
+      if (ls.some(l => [...l].length > 16)) return '每行最多 16 个字符';
+      return null;
+    },
+  }).then(s => {
+    if (s == null) return;
+    pushUndo();
+    const dd = new Array(80).fill(' ');
+    const ls = s.split('\n');
+    [...(ls[0] || '')].slice(0, 16).forEach((c, i) => { dd[i] = c; });
+    [...(ls[1] || '')].slice(0, 16).forEach((c, i) => { dd[0x40 + i] = c; });
+    ch.state.ddram = dd;
+    ch.state.cur = 0;
+    scheduleSave();
+    toast('显示文本已更新');
+  });
+}
+function clearLcd(ch) {
+  ch.state.ddram = new Array(80).fill(' ');
+  ch.state.cur = 0;
+  scheduleSave();
+  toast('已清屏');
+}
+/** 右键菜单追加项: 存储器 (按 mem 配置识别) 与 LCD1602 */
 function memoryMenuItems(ch) {
+  if (ch.type === 'LCD1602') return [
+    { text: '编辑显示文本…', fn: () => editLcdText(ch) },
+    { text: '清屏', fn: () => clearLcd(ch) },
+  ];
   const m = memCfg(ch);
   if (!m) return [];
   if (m.kind === 'rom') return [
@@ -2557,6 +2641,15 @@ function editLabelOrFreq(ch) {
   } else {
     editLabel(ch);
   }
+}
+
+/* 时钟频率显示格式: 0.1Hz / 2Hz / 1.5kHz / 20kHz */
+function fmtFreq(f) {
+  if (f >= 1000) {
+    const k = Math.round(f / 1000 * 100) / 100;
+    return k + 'kHz';
+  }
+  return f + 'Hz';
 }
 
 /* ---------- 面包板绘制 ---------- */
@@ -2758,7 +2851,8 @@ function drawBBChip(ch, z) {
   } else if (ch.bb.kind === 'row') {
     // IO 模块: 窄盒 (端部一个孔宽, 单脚元件近方形); 上半区盒在孔上方, 下半区盒在孔下方
     const lower = B.ROWS_BOT.includes(ch.bb.row);
-    const bh = ch.pins.length === 1 ? B.ROW_IO_W : 26;
+    const legs = B.rowLegs(ch);
+    const bh = legs.length === 1 ? B.ROW_IO_W : 26;
     const boxY = lower ? rect.y + 8 : rect.y;
     const legEnd = lower ? boxY : rect.y + bh;   // 腿靠盒一端
     ctx.fillStyle = '#242c36';
@@ -2767,19 +2861,32 @@ function drawBBChip(ch, z) {
     ctx.strokeStyle = sel ? COL.sel : (hov ? '#7c8b9c' : '#454e59');
     ctx.lineWidth = sel ? 1.8 : 1.2;
     ctx.stroke();
-    // 引脚腿
-    ctx.strokeStyle = '#8ba0b6';
+    // 引脚腿 (有源虚拟元件两端的隐式电源腿按极性着色)
     ctx.lineWidth = 1.4;
-    for (const p of ch.pins) {
-      const h = B.pinHole(ch, p.num);
-      const hp = B.holePos(h);
-      if (hp) { ctx.beginPath(); ctx.moveTo(hp.x, hp.y); ctx.lineTo(hp.x, legEnd); ctx.stroke(); }
+    for (const l of legs) {
+      const hp = B.holePos(l.hole);
+      if (!hp) continue;
+      ctx.strokeStyle = l.pol === 1 ? '#d9534f' : l.pol === 2 ? '#4a90d9' : '#8ba0b6';
+      ctx.beginPath(); ctx.moveTo(hp.x, hp.y); ctx.lineTo(hp.x, legEnd); ctx.stroke();
     }
     drawIOGlyph(ch, rect.x + rect.w / 2, boxY + bh / 2);
+    // 未供电徽标 (有源虚拟元件: CLOCK/PS2)
+    let badge = false;
+    if (ch.powered === false) {
+      badge = true;
+      const bx = rect.x + rect.w / 2, by = lower ? boxY + bh + 9 : boxY - 9;
+      ctx.font = 'bold 8px "Segoe UI","Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.strokeText('⚡未供电', bx, by);
+      ctx.fillStyle = '#e53935';
+      ctx.fillText('⚡未供电', bx, by);
+    }
     // 标识 (盒外侧, 带描边; 关闭时悬停显示)
     if (ch.props.label && ch.type !== 'SEG7' && (app.bbLabels || (app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id))) {
       const lx = rect.x + rect.w / 2;
-      const ly = lower ? boxY + bh + 9 : boxY - 9;
+      const ly = lower ? boxY + bh + (badge ? 19 : 9) : boxY - (badge ? 19 : 9);
       ctx.font = 'bold 8px Consolas, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.lineWidth = 3;
@@ -2851,14 +2958,14 @@ function drawIOGlyph(ch, cx, cy) {
       ctx.strokeStyle = ph ? COL.v1 : '#0288d1';
       ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.moveTo(cx - 8, cy - 4); ctx.lineTo(cx - 5, cy - 4); ctx.lineTo(cx - 5, cy - 9);
-      ctx.lineTo(cx - 1, cy - 9); ctx.lineTo(cx - 1, cy - 4); ctx.lineTo(cx + 3, cy - 4);
-      ctx.lineTo(cx + 3, cy - 9); ctx.lineTo(cx + 7, cy - 9); ctx.lineTo(cx + 7, cy - 4);
-      ctx.lineTo(cx + 9, cy - 4);
+      ctx.moveTo(cx - 8, cy - 3); ctx.lineTo(cx - 5, cy - 3); ctx.lineTo(cx - 5, cy - 8);
+      ctx.lineTo(cx - 1, cy - 8); ctx.lineTo(cx - 1, cy - 3); ctx.lineTo(cx + 3, cy - 3);
+      ctx.lineTo(cx + 3, cy - 8); ctx.lineTo(cx + 7, cy - 8); ctx.lineTo(cx + 7, cy - 3);
+      ctx.lineTo(cx + 9, cy - 3);
       ctx.stroke();
-      ctx.fillStyle = '#43566a';
-      ctx.font = '6px Consolas, monospace';
-      ctx.fillText((ch.props.freq || 2) + 'Hz', cx, cy + 7);
+      ctx.fillStyle = '#a9c3dc';
+      ctx.font = 'bold 7px Consolas, monospace';
+      ctx.fillText(fmtFreq(ch.props.freq || 2), cx, cy + 4);
       break;
     }
     case 'LED': {
@@ -3036,7 +3143,8 @@ function pcbContextMenu(e) {
     selectOnly('chip', ch.id);
     showCtxMenu(e.clientX, e.clientY, [
       { text: '旋转 90° (R)', fn: () => pcbRotate(ch) },
-      { text: '编辑标签…', fn: () => editLabelOrFreq(ch) },
+      ...(ch.type === 'CLOCK' ? [{ text: '编辑频率…', fn: () => editLabelOrFreq(ch) }] : []),
+      { text: '编辑标签…', fn: () => editLabel(ch) },
       ...memoryMenuItems(ch),
       { text: '移出PCB (Del)', fn: () => pcbUnplace(ch) },
       { text: '彻底删除元件', fn: () => deleteChip(ch) },

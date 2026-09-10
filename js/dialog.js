@@ -17,7 +17,7 @@ const Dialog = (() => {
     const o = Object.assign({
       title: '', message: '', label: null, value: '', placeholder: '',
       okText: '确定', cancelText: '取消', danger: false, validate: null,
-      multiline: false,   // true = 多行文本域 (Enter 换行, Ctrl+Enter 确定)
+      multiline: false, rows: 0,   // true = 多行文本域 (Enter 换行, Ctrl+Enter 确定)
     }, opts);
     return new Promise(resolve => {
       let done = false;
@@ -66,7 +66,7 @@ const Dialog = (() => {
         if (o.multiline) {
           input = document.createElement('textarea');
           input.className = 'dlg-input dlg-area';
-          input.rows = 14;
+          input.rows = o.rows || 14;
         } else {
           input = document.createElement('input');
           input.className = 'dlg-input';

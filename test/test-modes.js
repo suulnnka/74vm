@@ -393,18 +393,39 @@ console.log('\n[11] 供电: 电源脚孔位 / 自动供电跳线 / 供电判定'
   check('GND 列带 − (极性 2)', (BB.holeNetPower(info, ph.gnd) & 2) === 2, BB.holeNetPower(info, ph.gnd));
   check('chipPowered = true', BB.chipPowered(info, n) === true);
 
-  // 去掉供电跳线 → 未上电; 虚拟 IO 元件不做供电检查 (按元件性质豁免, 与放置形态无关)
+  // 去掉供电跳线 → 未上电; 无源虚拟元件不做供电检查 (按元件性质豁免, 与放置形态无关)
   info = BB.computeNets(sim, r.jumpers.filter(j => !j.pwr));
   check('移除供电跳线后 chipPowered = false', BB.chipPowered(info, n) === false);
   const io = sim.addChip('LED', 0, 0);
   io.bb = { kind: 'dip', board: 0, col: 40, flip: false };   // 虚拟元件即使摆成 DIP 也不检查
-  check('虚拟 IO 元件不做供电检查 (含 DIP 形态)', BB.chipPowered(info, io) === true);
-  check('全部单脚虚拟元件均豁免',
-    ['SW', 'BTN', 'CLOCK', 'PROBE', 'VCC', 'GND', 'PS2'].every(t => {
+  check('无源虚拟元件不做供电检查 (含 DIP 形态)', BB.chipPowered(info, io) === true);
+  check('全部无源单脚元件均豁免',
+    ['SW', 'BTN', 'LED', 'PROBE', 'VCC', 'GND'].every(t => {
       const c = sim.addChip(t, 0, 0);
       c.bb = { kind: 'dip', board: 0, col: 45, flip: false };
       return BB.chipPowered(info, c) === true;
     }));
+
+  // 有源虚拟元件 (CLOCK/PS2): 信号脚两侧带隐式电源腿, 需跳线接通电源轨
+  const ck = sim.addChip('CLOCK', 0, 0);
+  ck.bb = { kind: 'row', board: 0, row: 'a', col: 20 };
+  check('CLOCK 占 3 列 (VCC腿+CLK+GND腿)', BB.legCount(ck) === 3 && BB.rowLegs(ck).length === 3);
+  check('CLOCK 信号腿右移一列 → 0:a21', BB.pinHole(ck, 1) === '0:a21');
+  const phC = BB.powerHoles(ck);
+  check('CLOCK 电源腿在两端 a20/a22', phC.vcc === '0:a20' && phC.gnd === '0:a22', phC);
+  let infoC = BB.computeNets(sim, r.jumpers);
+  check('CLOCK 未接电 → 未上电', BB.chipPowered(infoC, ck) === false);
+  const rC = BB.autoWire(sim, []);
+  infoC = BB.computeNets(sim, rC.jumpers);
+  check('自动布线为 CLOCK 生成供电跳线 → 上电', BB.chipPowered(infoC, ck) === true);
+  check('CLOCK 电源腿列带 +− 极性',
+    (BB.holeNetPower(infoC, '0:a20') & 1) === 1 && (BB.holeNetPower(infoC, '0:a22') & 2) === 2);
+
+  const kb = sim.addChip('PS2', 0, 0);
+  kb.bb = { kind: 'row', board: 0, row: 'a', col: 30 };
+  check('PS2 占 4 列 (VCC腿+CLK+DATA+GND腿)', BB.legCount(kb) === 4 && BB.pinHole(kb, 1) === '0:a31');
+  const rK = BB.autoWire(sim, []);
+  check('PS2 上电 (供电跳线生成)', BB.chipPowered(BB.computeNets(sim, rK.jumpers), kb) === true);
 
   // 网表等价性不受供电跳线影响 (电源网络无引脚, 不派生导线)
   const b = EXAMPLES[2].build();
@@ -423,6 +444,48 @@ console.log('\n[11] 供电: 电源脚孔位 / 自动供电跳线 / 供电判定'
   const xor = Array.from(sim2.chips.values()).find(c => c.type === '7486');
   check('半加器芯片上电', xor.powered === true);
   check('上电后输出确定', sim2.pinDisplay(xor.pinByNum[3]) !== 'X', sim2.pinDisplay(xor.pinByNum[3]));
+}
+
+console.log('\n[9] LCD1602 液晶 (HD44780 接口 + 中文字库)');
+{
+  const sim = new Engine(LIB);
+  const lcd = sim.addChip('LCD1602', 0, 0);
+  const rs = sim.addChip('SW', 0, 0), en = sim.addChip('SW', 0, 0);
+  sim.addWire(rs, 1, lcd, 1);
+  sim.addWire(en, 1, lcd, 2);
+  const db = [];
+  for (let i = 0; i < 8; i++) {
+    const s2 = sim.addChip('SW', 0, 0);
+    db.push(s2);
+    sim.addWire(s2, 1, lcd, 3 + i);
+  }
+  const setByte = v => { for (let i = 0; i < 8; i++) sim.driveNow(db[i], 1, (v >> i) & 1); };
+  const strobe = () => { sim.driveNow(en, 1, 1); sim.driveNow(en, 1, 0); };
+
+  sim.driveNow(rs, 1, 0);            // RS=0 指令模式
+  setByte(0x01); strobe();           // 清屏
+  setByte(0x80); strobe();           // 设置地址 0 (第一行行首)
+  sim.driveNow(rs, 1, 1);            // RS=1 数据模式
+  setByte(0x48); strobe();           // 'H'
+  setByte(0x69); strobe();           // 'i'
+  check('LCD1602 写入 ASCII "Hi"', lcd.state.ddram[0] === 'H' && lcd.state.ddram[1] === 'i',
+    lcd.state.ddram.slice(0, 3));
+
+  setByte(0xD6); strobe(); setByte(0xD0); strobe();   // GB2312 双字节 '中'
+  check('LCD1602 中文双字节写入 (GB2312 中)', lcd.state.ddram[2] === '中', lcd.state.ddram[2]);
+
+  sim.driveNow(rs, 1, 0);
+  setByte(0x01); strobe();           // 清屏
+  check('LCD1602 清屏后 DDRAM 全空格', lcd.state.ddram.slice(0, 5).every(c => c === ' '));
+
+  setByte(0x80 | 0x40); strobe();    // 地址 0x40 = 第二行行首
+  sim.driveNow(rs, 1, 1);
+  setByte(0x41); strobe();           // 'A'
+  check('LCD1602 地址 0x40 写入第二行', lcd.state.ddram[0x40] === 'A');
+
+  // 光标随写入推进, 内容随存档序列化
+  const saved = JSON.parse(JSON.stringify(lcd.state));
+  check('LCD1602 显示内容随存档保存', saved.ddram[0] === ' ' && saved.ddram[0x40] === 'A' && saved.ddram.length === 80);
 }
 
 console.log(`结果: ${pass} 通过, ${fail} 失败`);

@@ -305,6 +305,24 @@ console.log('\n[15] PS/2 → 74164 接收 + 多字节队列');
   check('队列清空并回空闲', kb.state.queue.length === 0 && V(sim, kb, 1) === 1 && V(sim, kb, 2) === 1);
 }
 
+console.log('\n[15] 供电检查: 未上电时钟不振荡');
+{
+  const sim = makeSim();
+  const ck = sim.addChip('CLOCK', 0, 0, 0, { freq: 1000 });   // 1kHz → 半周期 500µs
+  sim.advance(10000);
+  check('上电时钟振荡 (时间推进 ≥10ms)', sim.simTime >= 10000, sim.simTime);
+  ck.powered = false;
+  const ph = ck.state.phase, tStop = sim.simTime;
+  sim.advance(10000);
+  check('未上电时钟停振 (相位与时间冻结)', ck.state.phase === ph && sim.simTime === tStop,
+    [ck.state.phase, sim.simTime]);
+  ck.powered = true;
+  const tBefore = sim.simTime;
+  sim.advance(10000);
+  check('重新上电恢复振荡', sim.simTime - tBefore >= 9999, sim.simTime - tBefore);
+  check('CLOCK 输出脚相位在 0/1 间翻转', ck.state.phase === 0 || ck.state.phase === 1);
+}
+
 console.log('\n========================================');
 console.log(`结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

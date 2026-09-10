@@ -684,6 +684,80 @@ defMem('6116', 'SRAM 2K×8', { kind: 'ram', size: 2048, mask: 0xFF,
   L(21, '/CS', 'in'), L(22, '/OE', 'in'),
 ]);
 
+
+/* ========================= 1602 字符型液晶 =========================
+ * HD44780 风格接口: RS (1=数据/0=指令) + E (上升沿锁存) + 8 位数据总线,
+ * RW 内部接地 (只写). 内置中文字库: 数据字节 >= 0x80 时与下一字节组成
+ * GB2312 双字节编码, 合成一个汉字写入光标处; ASCII 字节单字节直写.
+ * 常用指令: 0x01 清屏, 0x02/0x03 回 home, 0x80|n 设置地址
+ * (第一行 0x00~0x27, 第二行 0x40~0x67). 地址悬空/未知按 0. */
+
+let _gb2312 = null;
+function lcdDataByte(e) {
+  let v = 0;
+  for (let i = 0; i < 8; i++) if (e.read(3 + i) === V1) v |= 1 << i;
+  return v;
+}
+function lcdNext(a) { return a === 0x27 ? 0x40 : (a >= 0x67 ? 0 : a + 1); }
+function lcdPush(ch, b) {
+  const dd = ch.state.ddram;
+  if (b < 0x80) {
+    dd[ch.state.cur] = String.fromCharCode(b);
+  } else if (ch.state.pending == null) {
+    ch.state.pending = b;                        // 汉字首字节, 等待次字节
+    return;
+  } else {
+    try {
+      _gb2312 = _gb2312 || new TextDecoder('gb2312');
+      dd[ch.state.cur] = _gb2312.decode(new Uint8Array([ch.state.pending, b]));
+    } catch (err) { dd[ch.state.cur] = '?'; }
+    ch.state.pending = null;
+  }
+  ch.state.cur = lcdNext(ch.state.cur);
+}
+function lcdExecCmd(ch, cmd) {
+  const dd = ch.state.ddram;
+  if (cmd === 0x01) {                            // 清屏
+    for (let i = 0; i < 80; i++) dd[i] = ' ';
+    ch.state.cur = 0; ch.state.pending = null;
+  } else if (cmd === 0x02 || cmd === 0x03) {     // 回 home
+    ch.state.cur = 0; ch.state.pending = null;
+  } else if (cmd >= 0x80) {                      // 设置 DDRAM 地址
+    const a = cmd & 0x7F;
+    ch.state.cur = a < 80 ? a : 0;
+    ch.state.pending = null;
+  }
+}
+function lcdEnsureState(ch) {
+  if (ch.state.ddram && ch.state.ddram.length === 80) return;
+  const dd = new Array(80).fill(' ');
+  const t1 = 'Hello, 74VM!', t2 = '中文液晶测试';
+  [...t1].forEach((c, i) => { dd[i] = c; });
+  [...t2].forEach((c, i) => { dd[0x40 + i] = c; });
+  ch.state.ddram = dd;
+  ch.state.cur = 0;
+  ch.state.pending = null;
+  ch.state.prevE = 0;
+}
+
+def('LCD1602', '1602 液晶·内置中文字库', '输入/输出', [
+  L(1, 'RS', 'in'), L(2, 'E', 'in'),
+  R(3, 'D0', 'in'), R(4, 'D1', 'in'), R(5, 'D2', 'in'), R(6, 'D3', 'in'),
+  R(7, 'D4', 'in'), R(8, 'D5', 'in'), R(9, 'D6', 'in'), R(10, 'D7', 'in'),
+], {
+  custom: true, hideNums: true, size: { w: 224, h: 112 },
+  init(ch) { lcdEnsureState(ch); },
+  eval(ch, e) {
+    lcdEnsureState(ch);
+    const en = e.read(2);
+    const rising = en === V1 && ch.state.prevE !== V1;   // E 上升沿锁存
+    ch.state.prevE = en;
+    if (!rising) return;
+    if (e.read(1) === V1) lcdPush(ch, lcdDataByte(e));   // RS=1 数据
+    else lcdExecCmd(ch, lcdDataByte(e));                 // RS=0 指令
+  },
+});
+
 const CHIPS = { LIB };
 global.CHIPS = CHIPS;
 if (typeof module !== 'undefined' && module.exports) module.exports = CHIPS;

@@ -116,6 +116,12 @@ function dipSpan(ch) { return Math.ceil(physPins(ch) / 2); }
 /* ---------- 放置模型 ---------- */
 /** ch.bb = {kind:'dip', col, flip} | {kind:'row', row, col} | {kind:'rail', rail, col} */
 
+/** 有源虚拟元件: 无电源脚但需要供电的模块, 在信号脚两侧带隐式 VCC/GND 腿 */
+const ACTIVE_CUSTOM = { CLOCK: true, PS2: true };
+const isActiveCustom = t => !!ACTIVE_CUSTOM[t];
+/** 行模块占位腿数 (有源虚拟元件 = 信号脚 + 两侧电源腿) */
+const legCount = ch => ch.pins.length + (isActiveCustom(ch.type) ? 2 : 0);
+
 /** 元件某引脚所在孔位 (未放置返回 null); DIP 按物理引脚号定位, 电源脚位置空置 */
 function pinHole(ch, pinNum) {
   const bb = ch.bb;
@@ -133,16 +139,31 @@ function pinHole(ch, pinNum) {
   }
   if (bb.kind === 'row') {
     const idx = ch.pins.findIndex(p => p.num === pinNum);
-    return b + bb.row + (bb.col + Math.max(0, idx));
+    return b + bb.row + (bb.col + (isActiveCustom(ch.type) ? 1 : 0) + Math.max(0, idx));
   }
   if (bb.kind === 'rail') return b + bb.rail + '-' + bb.col;
   return null;
 }
 
-/** 元件占据的孔位集合 */
+/** 行模块腿位列表: [{hole, pin|null, pol}] — 有源虚拟元件两端为隐式电源腿 (pol: 1=+ 2=−) */
+function rowLegs(ch) {
+  if (!ch.bb || ch.bb.kind !== 'row') return null;
+  const b = (ch.bb.board || 0) + ':';
+  const active = isActiveCustom(ch.type);
+  const off = active ? 1 : 0;
+  const legs = [];
+  if (active) legs.push({ hole: b + ch.bb.row + ch.bb.col, pol: 1 });
+  ch.pins.forEach((p, i) => legs.push({ hole: b + ch.bb.row + (ch.bb.col + off + i), pin: p }));
+  if (active) legs.push({ hole: b + ch.bb.row + (ch.bb.col + off + ch.pins.length), pol: 2 });
+  return legs;
+}
+
+/** 元件占据的孔位集合 (含有源虚拟元件的隐式电源腿) */
 function chipHoles(ch) {
   const out = [];
   for (const p of ch.pins) { const h = pinHole(ch, p.num); if (h) out.push(h); }
+  const legs = rowLegs(ch);
+  if (legs) for (const l of legs) if (!l.pin && !out.includes(l.hole)) out.push(l.hole);
   return out;
 }
 
@@ -164,7 +185,7 @@ function chipRect(ch) {
     return { x: colX(bb.col) - PITCH / 2, y: oy + ROW_Y.e - 8, w: span * PITCH, h: ROW_Y.f - ROW_Y.e + 16 };
   }
   if (bb.kind === 'row') {
-    const n = Math.max(1, ch.pins.length);
+    const n = legCount(ch);
     const p0 = holePos((bb.board || 0) + ':' + bb.row + bb.col);
     if (!p0) return null;
     // 宽度 = (n-1) 列距 + 端部一个孔宽 (18): 相邻孔位仍可放其他 IO 元件
@@ -183,15 +204,12 @@ function chipRect(ch) {
   return { x: p.x - ROW_IO_W / 2, y: top ? p.y - 26 : p.y - 6, w: ROW_IO_W, h: 24 };
 }
 
-/** 孔位占用: holeKey → {chip, pinNum} */
+/** 孔位占用: holeKey → {chip, pinNum} (含有源虚拟元件的隐式电源腿, pinNum=null) */
 function occupancy(sim) {
   const occ = new Map();
   for (const ch of sim.chips.values()) {
     if (!ch.bb) continue;
-    for (const p of ch.pins) {
-      const h = pinHole(ch, p.num);
-      if (h) occ.set(h, { chip: ch, pinNum: p.num });
-    }
+    for (const h of chipHoles(ch)) occ.set(h, { chip: ch, pinNum: null });
   }
   return occ;
 }
@@ -283,11 +301,18 @@ function deriveWires(sim, jumpers) {
 }
 
 /* ---------- 供电检查 ---------- */
-/** DIP 电源脚孔位 (标准 74 封装: GND=物理中间脚, VCC=物理最大脚); 非 DIP 返回 null */
+/** 电源腿孔位: DIP = 物理电源脚 (GND=中间脚/VCC=最大脚), 有源虚拟元件 = 行两端隐式腿; 其余 null */
 function powerHoles(ch) {
-  if (!ch.bb || ch.bb.kind !== 'dip') return null;
-  const phys = physPins(ch);
-  return { gnd: pinHole(ch, phys / 2), vcc: pinHole(ch, phys) };
+  if (!ch.bb) return null;
+  if (ch.bb.kind === 'dip') {
+    const phys = physPins(ch);
+    return { gnd: pinHole(ch, phys / 2), vcc: pinHole(ch, phys) };
+  }
+  if (ch.bb.kind === 'row' && isActiveCustom(ch.type)) {
+    const b = (ch.bb.board || 0) + ':';
+    return { vcc: b + ch.bb.row + ch.bb.col, gnd: b + ch.bb.row + (ch.bb.col + legCount(ch) - 1) };
+  }
+  return null;
 }
 
 /** 网络电源极性: 0 无 / 1 = + / 2 = − / 3 = +−冲突 (看电源轨组或 VCC/GND 源引脚) */
@@ -310,12 +335,13 @@ function holeNetPower(info, hole) {
   return info && info.holeNet.has(hole) ? netPower(info, info.holeNet.get(hole)) : 0;
 }
 
-/** 芯片供电判定 (面包板模式): 已放置 DIP 要求 VCC 列带 + 且 GND 列带 −;
- *  虚拟/抽象元件 (custom: 开关/按键/时钟/LED/探针/PS2/VCC/GND…) 本身无电源概念, 一律不检查 */
+/** 芯片供电判定 (面包板模式): DIP 与有源虚拟元件 (CLOCK/PS2) 要求 VCC 列带 + 且 GND 列带 −;
+ *  无源虚拟元件 (custom: 开关/按键/LED/探针/VCC/GND…) 本身无电源概念, 一律不检查 */
 function chipPowered(info, ch) {
-  if (LIB_isIO(ch.type)) return true;
-  if (!ch.bb || ch.bb.kind !== 'dip') return true;
+  if (LIB_isIO(ch.type) && !isActiveCustom(ch.type)) return true;
+  if (!ch.bb) return true;
   const ph = powerHoles(ch);
+  if (!ph) return true;
   return (holeNetPower(info, ph.vcc) & 1) !== 0 && (holeNetPower(info, ph.gnd) & 2) !== 0;
 }
 
@@ -340,7 +366,7 @@ function autoPlace(sim) {
   // IO 元件: VCC/GND 上电源轨, 其余放 a 行 (放不下换下一块板)
   let railColP = 2, railColN = 2, rowCol = col, rowBoard = board;
   for (const ch of ios) {
-    const n = Math.max(1, ch.pins.length);
+    const n = legCount(ch);
     if (ch.type === 'VCC') { ch.bb = { kind: 'rail', board: 0, rail: 'R1', col: railColP }; railColP += 3; }
     else if (ch.type === 'GND') { ch.bb = { kind: 'rail', board: 0, rail: 'R2', col: railColN }; railColN += 3; }
     else {
@@ -396,11 +422,12 @@ function autoWire(sim, schematicWires) {
     }
     return board + ':' + rail + '-2';
   };
-  // DIP 电源脚所在列整组保留给供电: 信号跳线落入会经电源轨把两个网络短路
+  // 电源腿所在列整组保留给供电: 信号跳线落入会经电源轨把两个网络短路
   const pwrBlocked = new Set();
   for (const ch of sim.chips.values()) {
-    if (!ch.bb || ch.bb.kind !== 'dip') continue;
+    if (!ch.bb) continue;
     const ph = powerHoles(ch);
+    if (!ph) continue;
     for (const h of [ph.vcc, ph.gnd]) for (const hk of groupHoles(groupOf(h))) pwrBlocked.add(hk);
   }
 
@@ -438,11 +465,12 @@ function autoWire(sim, schematicWires) {
     }
   }
 
-  // 供电跳线: 每颗 DIP 的 VCC/GND 电源脚列 → 电源轨 (电源轨视为已接通台式电源)
+  // 供电跳线: 每颗 DIP / 有源虚拟元件的 VCC/GND 电源腿列 → 电源轨 (电源轨视为已接通台式电源)
   const occ = occupancy(sim);
   for (const ch of sim.chips.values()) {
-    if (!ch.bb || ch.bb.kind !== 'dip') continue;
+    if (!ch.bb) continue;
     const ph = powerHoles(ch);
+    if (!ph) continue;
     const b = ch.bb.board || 0;
     for (const [hole, rail] of [[ph.vcc, 'R1'], [ph.gnd, 'R2']]) {
       const ci = hole.indexOf(':'), rest = hole.slice(ci + 1), col = rest.slice(1);
@@ -465,6 +493,7 @@ const BB = {
   colX, holePos, groupOf, groupHoles, physPins, dipSpan, pinHole, chipHoles, chipRect,
   occupancy, dipColsFree, computeNets, deriveWires, autoPlace, autoWire,
   powerHoles, netPower, holeNetPower, chipPowered,
+  isActiveCustom, legCount, rowLegs,
 };
 global.BB = BB;
 if (typeof module !== 'undefined' && module.exports) module.exports = { BB };
