@@ -42,6 +42,7 @@ const app = {
   undoStack: [],
   redoStack: [],
   libShown: true,
+  bbLabels: true,   // 面包板元件标识 (关=悬停显示)
   dnd: null,   // 原生拖放状态 {type, x, y}
 };
 app.cam = app.cams.schematic;
@@ -1427,6 +1428,13 @@ function setLibShown(v) {
 function toggleLib() { setLibShown(!app.libShown); }
 document.getElementById('sideToggle').onclick = toggleLib;
 
+/* ---------- 面包板元件标识 ---------- */
+function setBBLabels(v) {
+  app.bbLabels = !!v;
+  try { localStorage.setItem('74vm:labels', app.bbLabels ? '1' : '0'); } catch (e) { }
+  Menus.refresh();
+}
+
 /* ---------- 面包板动作 ---------- */
 function bbActAuto() { bbAutoAll(true); Menus.refresh(); }
 function bbActPlace() {
@@ -1526,6 +1534,7 @@ const Menus = {
       { label: '视图(V)', items: [
         { label: '适配视图', act: fitDispatch },
         { label: '元件库', hint: '侧栏', radio: 'lib', act: toggleLib },
+        { label: '元件标识 (面包板)', hint: '关=悬停显示', radio: 'labels', act: () => setBBLabels(!app.bbLabels) },
         { sep: true },
         { label: '原理图模式', hint: '1', radio: 'mode', val: 'schematic', act: () => switchMode('schematic') },
         { label: '面包板模式', hint: '2', radio: 'mode', val: 'breadboard', act: () => switchMode('breadboard') },
@@ -1565,6 +1574,7 @@ const Menus = {
     if (it.radio === 'mode') return app.mode === it.val;
     if (it.radio === 'speed') return app.speed === it.val;
     if (it.radio === 'lib') return app.libShown;
+    if (it.radio === 'labels') return app.bbLabels;
     return false;
   },
   build() {
@@ -1663,6 +1673,7 @@ window.addEventListener('keydown', e => {
 });
 Menus.build();
 setLibShown(localStorage.getItem('74vm:lib') !== '0');   // 侧栏初始状态
+try { app.bbLabels = localStorage.getItem('74vm:labels') !== '0'; } catch (e) { app.bbLabels = true; }   // 面包板标识默认显示
 
 function loadExample(ex) {
   if (sim.chips.size) pushUndo();
@@ -2675,7 +2686,13 @@ function drawIOGlyph(ch, cx, cy) {
       ctx.fillText(ch.type, cx, cy);
   }
   if (ch.props.label && ch.type !== 'SEG7') {
-    ctx.font = '7.5px Consolas, monospace';
+    // 关闭标识时: 仅鼠标悬停该元件才显示
+    if (!app.bbLabels && !(app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id)) return;
+    ctx.font = 'bold 8px Consolas, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,.9)';   // 浅色描边: 米黄板面/深色盒上都清晰
+    ctx.strokeText(ch.props.label, cx, cy + 15);
     ctx.fillStyle = COL.label;
     ctx.fillText(ch.props.label, cx, cy + 15);
   }
