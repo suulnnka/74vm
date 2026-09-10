@@ -281,5 +281,84 @@ console.log('[10] 原理图元件尺寸均为偶数格 (56px 倍数, 边框压�
   check('IO 元件声明尺寸全部 56 倍数', ok, bad);
 }
 
+console.log('\n[8] ROM / RAM 存储器');
+{
+  const sim = new Engine(LIB);
+  // 地址总线: SW×8 → A0..A7 (ROM 与 RAM 共用)
+  const addrSw = [];
+  for (let i = 0; i < 8; i++) {
+    const s = sim.addChip('SW', 0, 0);
+    addrSw.push(s);
+  }
+  const rom = sim.addChip('ROM', 0, 0);
+  const ram = sim.addChip('RAM', 0, 0);
+  for (let i = 0; i < 8; i++) {
+    sim.addWire(addrSw[i], 1, rom, i + 1);
+    sim.addWire(addrSw[i], 1, ram, i + 1);
+  }
+  // 数据总线: SW×8 → RAM D0..D7 (写通道); RAM/ROM 输出读回用 pinDisplay
+  const dataSw = [];
+  for (let i = 0; i < 8; i++) {
+    const s = sim.addChip('SW', 0, 0);
+    dataSw.push(s);
+    sim.addWire(s, 1, ram, 11 + i);
+  }
+  const csSw = sim.addChip('SW', 0, 0), weSw = sim.addChip('SW', 0, 0);
+  sim.addWire(csSw, 1, ram, 10);
+  sim.addWire(weSw, 1, ram, 9);
+  const setBus = (sws, v) => { for (let i = 0; i < 8; i++) sim.driveNow(sws[i], 1, (v >> i) & 1); };
+  /** 读回前断开/恢复数据开关 (模拟真实系统释放写总线) */
+  let dataWires = [];
+  const detachData = () => {
+    dataWires = [...sim.wires].filter(w => w.a.chip === ram && w.a.num >= 11 || w.b.chip === ram && w.b.num >= 11);
+    for (const w of dataWires) sim.removeWire(w.id);
+  };
+  const attachData = () => { for (let i = 0; i < 8; i++) sim.addWire(dataSw[i], 1, ram, 11 + i); };
+  const readD = (chip) => {
+    let v = 0;
+    for (let i = 0; i < 8; i++) if (sim.pinDisplay(chip.pinByNum[(chip.type === 'ROM' ? 9 : 11) + i]) === 1) v |= 1 << i;
+    return v;
+  };
+
+  // ROM 出厂内容 = 地址 (identity)
+  setBus(addrSw, 0xA5);
+  check('ROM 地址 0xA5 读出 0xA5 (出厂=地址)', readD(rom) === 0xA5, readD(rom));
+
+  // RAM 写: CS=1 WE=1, 地址 0x3C 写入 0x5F
+  setBus(addrSw, 0x3C);
+  setBus(dataSw, 0x5F);
+  sim.driveNow(csSw, 1, 1);
+  sim.driveNow(weSw, 1, 1);
+  // 读回: 断开写总线 → WE=0 → RAM 驱动数据线
+  detachData();
+  sim.driveNow(weSw, 1, 0);
+  check('RAM 写 0x5F @0x3C 后读回 0x5F', readD(ram) === 0x5F, readD(ram));
+
+  // 再写另一地址后切回, 内容不丢
+  attachData();
+  setBus(addrSw, 0x10);
+  setBus(dataSw, 0x77);
+  sim.driveNow(weSw, 1, 1);
+  sim.driveNow(weSw, 1, 0);
+  detachData();
+  check('RAM 地址 0x10 读回 0x77', readD(ram) === 0x77, readD(ram));
+  setBus(addrSw, 0x3C);
+  check('RAM 地址 0x3C 内容仍为 0x5F', readD(ram) === 0x5F, readD(ram));
+
+  // CS=0 时数据线高阻 (不驱动总线)
+  sim.driveNow(csSw, 1, 0);
+  const d0 = sim.pinDisplay(ram.pinByNum[11]);
+  check('RAM 未选中 (CS=0) 数据线高阻', d0 === 'Z', d0);
+
+  // ROM/RAM 内容经 JSON 序列化保持
+  const saved = JSON.parse(JSON.stringify({
+    chips: Array.from(sim.chips.values()).map(c => ({ type: c.type, props: c.props })),
+  }));
+  const romSaved = saved.chips.find(c => c.type === 'ROM');
+  const ramSaved = saved.chips.find(c => c.type === 'RAM');
+  check('ROM 出厂内容随存档保存 (0xA5=0xA5)', romSaved.props.mem[0xA5] === 0xA5);
+  check('RAM 写入内容随存档保存 (0x3C=0x5F)', ramSaved.props.mem[0x3C] === 0x5F);
+}
+
 console.log(`结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

@@ -10,7 +10,7 @@
 (function (global) {
 'use strict';
 
-const { VX, V0, V1 } = global.EngineModule.Sim;
+const { VX, V0, V1, VZ } = global.EngineModule.Sim;
 
 const L = (num, name, dir) => ({ num, name, dir, side: 'L' });
 const R = (num, name, dir) => ({ num, name, dir, side: 'R' });
@@ -510,6 +510,71 @@ def('VCC', '电源 +5V(恒1)', '输入/输出', [R(1, '5V', 'out')], {
 def('GND', '地 GND(恒0)', '输入/输出', [R(1, 'GND', 'out')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 0; },
+});
+
+/* ========================= 存储器 ========================= */
+
+const MEM_SIZE = 256;   // 256 × 8bit, A0..A7
+
+function memDefault(identity) {
+  const m = new Array(MEM_SIZE).fill(0);
+  if (identity) for (let i = 0; i < MEM_SIZE; i++) m[i] = i & 0xFF;   // ROM 出厂: 内容=地址
+  return m;
+}
+/** 地址位 A0..A7 (脚1..8); 悬空/未知位按 0 (弱上拉策略, 与 ~ 引脚一致) */
+function memAddr(e) {
+  let a = 0;
+  for (let i = 0; i < 8; i++) if (e.read(i + 1) === V1) a |= 1 << i;
+  return a;
+}
+
+def('ROM', 'ROM 256×8 (右键编辑/导入)', '存储器', [
+  L(1, 'A0', 'in'), L(2, 'A1', 'in'), L(3, 'A2', 'in'), L(4, 'A3', 'in'),
+  L(5, 'A4', 'in'), L(6, 'A5', 'in'), L(7, 'A6', 'in'), L(8, 'A7', 'in'),
+  R(9, 'D0', 'out'), R(10, 'D1', 'out'), R(11, 'D2', 'out'), R(12, 'D3', 'out'),
+  R(13, 'D4', 'out'), R(14, 'D5', 'out'), R(15, 'D6', 'out'), R(16, 'D7', 'out'),
+], {
+  defaults: { mem: memDefault(true) },
+  eval(ch, e) {
+    const a = memAddr(e);
+    const m = ch.props.mem || (ch.props.mem = memDefault(true));
+    const v = m[a] || 0;
+    for (let i = 0; i < 8; i++) e.drive(9 + i, (v >> i) & 1, 3);
+  },
+});
+
+def('RAM', 'RAM 256×8 (CS/WE 高有效)', '存储器', [
+  L(1, 'A0', 'in'), L(2, 'A1', 'in'), L(3, 'A2', 'in'), L(4, 'A3', 'in'),
+  L(5, 'A4', 'in'), L(6, 'A5', 'in'), L(7, 'A6', 'in'), L(8, 'A7', 'in'),
+  L(9, 'WE', 'in'), L(10, 'CS', 'in'),
+  R(11, 'D0', 'io'), R(12, 'D1', 'io'), R(13, 'D2', 'io'), R(14, 'D3', 'io'),
+  R(15, 'D4', 'io'), R(16, 'D5', 'io'), R(17, 'D6', 'io'), R(18, 'D7', 'io'),
+], {
+  defaults: { mem: memDefault(false) },
+  eval(ch, e) {
+    const m = ch.props.mem || (ch.props.mem = memDefault(false));
+    const cs = e.read(10) === V1;   // 片选, 高有效; 悬空/未知 = 未选中
+    const we = e.read(9) === V1;    // 写使能, 高有效
+    const a = memAddr(e);
+    if (!cs) {
+      for (let i = 0; i < 8; i++) e.drive(11 + i, VZ, 3);   // 未选中: 数据线高阻
+      return;
+    }
+    if (we) {
+      // 写: 数据位含未知 (悬空总线) 时不写入, 避免破坏内容
+      let v = 0, ok = true;
+      for (let i = 0; i < 8; i++) {
+        const b = e.read(11 + i);
+        if (b === VX) { ok = false; break; }
+        if (b === V1) v |= 1 << i;
+      }
+      if (ok) m[a] = v;
+      for (let i = 0; i < 8; i++) e.drive(11 + i, VZ, 3);   // 写周期数据线保持高阻
+    } else {
+      const v = m[a] || 0;
+      for (let i = 0; i < 8; i++) e.drive(11 + i, (v >> i) & 1, 3);
+    }
+  },
 });
 
 const CHIPS = { LIB };

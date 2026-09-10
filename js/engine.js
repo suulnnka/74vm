@@ -267,6 +267,17 @@ class Engine {
   }
 
   /** 上电扰动(仅作用于 driven===X 的门输出) */
+  /** 外部状态变更 (如 ROM 内容改写) 后: 重评估全部元件并结算 */
+  reevalAll() {
+    this.version++;
+    for (const ch of this.chips.values()) {
+      const d = this.lib[ch.type];
+      if (d.gates || d.eval) this.evalChip(ch);
+    }
+    this.flush(this.SETTLE_CAP);
+    this.kick();
+  }
+
   kick() {
     const before = new Map();
     for (const n of this.nets) before.set(n, n.value);

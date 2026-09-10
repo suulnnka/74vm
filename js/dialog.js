@@ -17,6 +17,7 @@ const Dialog = (() => {
     const o = Object.assign({
       title: '', message: '', label: null, value: '', placeholder: '',
       okText: '确定', cancelText: '取消', danger: false, validate: null,
+      multiline: false,   // true = 多行文本域 (Enter 换行, Ctrl+Enter 确定)
     }, opts);
     return new Promise(resolve => {
       let done = false;
@@ -55,20 +56,29 @@ const Dialog = (() => {
         m.textContent = o.message;
         body.appendChild(m);
       }
-      if (o.label != null) {
-        const lb = document.createElement('label');
-        lb.className = 'dlg-label';
-        lb.textContent = o.label;
-        input = document.createElement('input');
-        input.className = 'dlg-input';
-        input.type = 'text';
+      if (o.label != null || o.multiline) {
+        if (o.label != null) {
+          const lb = document.createElement('label');
+          lb.className = 'dlg-label';
+          lb.textContent = o.label;
+          body.appendChild(lb);
+        }
+        if (o.multiline) {
+          input = document.createElement('textarea');
+          input.className = 'dlg-input dlg-area';
+          input.rows = 14;
+        } else {
+          input = document.createElement('input');
+          input.className = 'dlg-input';
+          input.type = 'text';
+        }
         input.value = o.value;
         input.placeholder = o.placeholder;
         input.spellcheck = false;
         errEl = document.createElement('div');
         errEl.className = 'dlg-err';
         errEl.style.display = 'none';
-        body.appendChild(lb); body.appendChild(input); body.appendChild(errEl);
+        body.appendChild(input); body.appendChild(errEl);
       }
 
       const foot = document.createElement('div');
@@ -105,7 +115,10 @@ const Dialog = (() => {
       box.addEventListener('keydown', e => {
         e.stopPropagation();          // 弹窗内按键不触发画布快捷键
         if (e.key === 'Escape') { e.preventDefault(); finish(null); }
-        else if (e.key === 'Enter') { e.preventDefault(); ok(); }
+        else if (e.key === 'Enter') {
+          if (o.multiline && !e.ctrlKey) return;   // 多行: Enter 换行, Ctrl+Enter 确定
+          e.preventDefault(); ok();
+        }
       });
       if (input) input.addEventListener('input', () => {
         input.classList.remove('invalid');
@@ -138,7 +151,10 @@ const Dialog = (() => {
       btnOk.onclick = ok;
       document.body.appendChild(overlay);
       (input || btnOk).focus();
-      if (input && input.value) input.select();
+      if (input && input.value) {
+        if (o.multiline) input.setSelectionRange(0, 0);   // 多行: 光标置顶 (Ctrl+A 全选复制)
+        else input.select();
+      }
     });
   }
 

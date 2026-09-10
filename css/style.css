@@ -213,6 +213,10 @@ select.btn { padding: 4px 6px; }
 }
 .dlg-input:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 2px rgba(2,136,209,.16); }
 .dlg-input.invalid { border-color: var(--danger); box-shadow: 0 0 0 2px rgba(211,47,47,.16); }
+.dlg-area {
+  height: 280px; resize: vertical; line-height: 1.5;
+  white-space: pre; overflow: auto;
+}
 .dlg-err { color: var(--danger); font-size: 12px; margin-top: 6px; }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px 16px; }
 .btn.danger { background: var(--danger); border-color: #b71c1c; color: #fff; }

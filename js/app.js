@@ -1068,6 +1068,7 @@ canvas.addEventListener('contextmenu', e => {
     const items = [];
     if (!LIB[ch.type].fixedRot) items.push({ text: '旋转 90° (R)', fn: () => rotateChip(ch) });
     items.push({ text: ch.type === 'CLOCK' ? '编辑频率…' : '编辑标签…', fn: () => editLabelOrFreq(ch) });
+    items.push(...memoryMenuItems(ch));
     items.push({ text: '复制 (Ctrl+D)', fn: () => duplicateSelection() });
     items.push({ text: '删除 (Del)', fn: () => deleteChip(ch) });
     showCtxMenu(e.clientX, e.clientY, items);
@@ -1195,7 +1196,7 @@ window.addEventListener('keydown', e => {
 
 /* ================= 元件库侧栏 ================= */
 
-const CAT_ORDER = ['输入/输出', '门电路', '组合逻辑', '触发器/锁存', '计数/移位', '总线接口'];
+const CAT_ORDER = ['输入/输出', '门电路', '组合逻辑', '触发器/锁存', '计数/移位', '存储器', '总线接口'];
 function buildLib(filter) {
   const libEl = document.getElementById('lib');
   libEl.innerHTML = '';
@@ -2173,6 +2174,7 @@ function bbContextMenu(e) {
     const items = [];
     if (!LIB[ch.type].custom) items.push({ text: '翻转 180° (R)', fn: () => bbFlip(ch) });
     items.push({ text: '编辑标签…', fn: () => editLabelOrFreq(ch) });
+    items.push(...memoryMenuItems(ch));
     items.push({ text: '移出面包板 (Del)', fn: () => bbUnplace(ch) });
     items.push({ text: '彻底删除元件', fn: () => deleteChip(ch) });
     showCtxMenu(e.clientX, e.clientY, items);
@@ -2226,6 +2228,80 @@ function bbRotateSelection() {
       if (ch && ch.bb && ch.bb.kind === 'dip') bbFlip(ch);
     }
   }
+}
+
+/* ---------- ROM/RAM 存储器: 十六进制内容编辑 / 快照 / 导入导出 ---------- */
+
+const MEM_SIZE = 256;
+function memToHex(mem) {
+  const out = [];
+  for (let r = 0; r < MEM_SIZE; r += 16) {
+    out.push(Array.from(mem.slice(r, r + 16), b => (b & 0xFF).toString(16).padStart(2, '0').toUpperCase()).join(' '));
+  }
+  return out.join('\n');
+}
+/** 解析十六进制字节流 (容忍 0x 前缀/逗号/换行), 无效返回 null; 不足 256 补 00 */
+function parseHexMem(s) {
+  const toks = String(s).replace(/0[xX]/g, '').split(/[\s,]+/).filter(t => t);
+  if (!toks.length) return null;
+  const bytes = [];
+  for (const t of toks) {
+    if (!/^[0-9a-fA-F]{1,2}$/.test(t)) return null;
+    bytes.push(parseInt(t, 16));
+  }
+  const mem = new Array(MEM_SIZE).fill(0);
+  for (let i = 0; i < Math.min(bytes.length, MEM_SIZE); i++) mem[i] = bytes[i];
+  return mem;
+}
+function memChipName(ch) {
+  return ch.props.label ? ch.props.label : ch.type + '#' + ch.id;
+}
+function editRom(ch) {
+  Dialog.prompt({
+    title: 'ROM 内容 — ' + memChipName(ch) + ' (256×8)',
+    label: '每字节 2 位十六进制, 空格分隔 (每行 16 字节). 可直接粘贴导入, 不足部分补 00:',
+    value: memToHex(ch.props.mem || []),
+    multiline: true,
+    okText: '写入',
+    validate: s => parseHexMem(s) == null ? '格式无效: 只允许十六进制字节 (00 ~ FF)' : null,
+  }).then(s => {
+    if (s == null) return;
+    pushUndo();
+    ch.props.mem = parseHexMem(s);
+    sim.touch();
+    sim.reevalAll();   // 内容变化不经过引脚事件, 需重评估全部元件
+    scheduleSave();
+    toast('ROM 内容已写入');
+  });
+}
+function memSnapshot(ch) {
+  const hex = memToHex(ch.props.mem || []);
+  Dialog.prompt({
+    title: 'RAM 快照 — ' + memChipName(ch),
+    message: '当前 256 字节内容 (已尝试复制到剪贴板):',
+    value: hex, multiline: true, okText: '关闭',
+  });
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(hex).then(() => toast('快照已复制到剪贴板')).catch(() => { });
+  }
+}
+function exportMem(ch) {
+  const base = ch.props.label ? ch.props.label.replace(/[\\/:*?"<>|]+/g, '_') : ch.type + ch.id;
+  const fn = base + '.' + ch.type.toLowerCase() + '.hex';
+  downloadBlob(memToHex(ch.props.mem || []), fn);
+  toast('已导出 ' + fn);
+}
+/** 右键菜单追加项: ROM 编辑/导出, RAM 快照/导出 */
+function memoryMenuItems(ch) {
+  if (ch.type === 'ROM') return [
+    { text: '编辑内容 (十六进制)…', fn: () => editRom(ch) },
+    { text: '导出内容 (十六进制文件)', fn: () => exportMem(ch) },
+  ];
+  if (ch.type === 'RAM') return [
+    { text: '获取快照 (十六进制)…', fn: () => memSnapshot(ch) },
+    { text: '导出快照 (十六进制文件)', fn: () => exportMem(ch) },
+  ];
+  return [];
 }
 
 function editLabelOrFreq(ch) {
@@ -2704,6 +2780,7 @@ function pcbContextMenu(e) {
     showCtxMenu(e.clientX, e.clientY, [
       { text: '旋转 90° (R)', fn: () => pcbRotate(ch) },
       { text: '编辑标签…', fn: () => editLabelOrFreq(ch) },
+      ...memoryMenuItems(ch),
       { text: '移出PCB (Del)', fn: () => pcbUnplace(ch) },
       { text: '彻底删除元件', fn: () => deleteChip(ch) },
     ]);
