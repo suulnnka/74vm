@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>74VM · 74系列数字电路模拟器</title>
+<link rel="stylesheet" href="css/style.css?v=6">
+</head>
+<body>
+<header id="toolbar">
+  <div id="menubar"></div>
+  <span class="grow"></span>
+</header>
+<div id="main">
+  <aside id="sidebar">
+    <input id="search" type="text" placeholder="搜索元件（如 74161 / 计数）" autocomplete="off">
+    <div id="lib"></div>
+  </aside>
+  <div id="holder">
+    <button id="sideToggle" class="side-toggle" title="收起/展开元件库">‹</button>
+    <canvas id="cv"></canvas>
+    <div id="tooltip"></div>
+    <div id="ctxmenu" class="menu"></div>
+  </div>
+</div>
+<footer id="status">
+  <span id="stState" class="ok">● 运行中</span><span class="dot">·</span>
+  <span id="stTime">t = 0.00 ms</span><span class="dot">·</span>
+  <span id="stCount">元件 0 · 导线 0</span>
+  <span class="grow"></span>
+  <span id="stWarn"></span>
+  <span class="dot">·</span><span id="stZoom">缩放 100%</span>
+</footer>
+<div id="toasts"></div>
+<div id="helpModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><b>74VM 使用帮助</b><button id="btnHelpClose" class="btn">✕ 关闭</button></div>
+    <div class="modal-body">
+      <h4>三种模式（顶栏切换，或按 1 / 2 / 3）</h4>
+      <ul>
+        <li><b>📐 原理图</b>：默认模式，拖拽元件、按住引脚拖动连线、实时仿真。</li>
+        <li><b>🍞 面包板</b>：真实面包板视图（60 列 × a-j 行 + 上下电源轨，每列 5 孔连通）。首次进入会<b>自动摆放元件并按原理图网络生成全部跳线</b>；也可用 ✨自动布线 / 📐重新摆放 / 🧹清空接线。按住孔位拖到目标孔位松开即可拉跳线；拖动只接了一根跳线的孔位 = 移动该跳线端；把 VCC/GND 拖到电源轨可给整条轨供电；DIP 按真实物理引脚跨列（电源脚位空置），按 R 翻转 180°。面包板模式下电路照常实时仿真。</li>
+        <li><b>🟩 PCB</b>：DIP 封装布局 + 飞线预览（按原理图网表）。拖动/旋转(R)封装后，<b>📤 导出立创EDA</b> 生成其标准版可直接打开的 PCB 源文件——焊盘已带网络名，打开后显示飞线，可直接使用立创EDA的自动布线；📋 导出网表 为通用网表 JSON（供未来自有布线器）。</li>
+      </ul>
+      <h4>基本操作</h4>
+      <ul>
+        <li><b>放置元件</b>：从左侧元件库<b>拖拽</b>到画布，或直接<b>点击</b>元件名放到视图中央。</li>
+        <li><b>连线</b>：<b>按住引脚拖到目标引脚松开</b>即可连线；中途松开在空白处取消。一个引脚可以连接多条导线（相当于并线）。<b>拖动只连了一根线的引脚 = 移动该线端</b>（重新接线）；此时按住 <kbd>Ctrl</kbd> 拖动则强制新建连线。</li>
+        <li><b>移动 / 视图</b>：<b>左键拖动元件</b>移动；<b>右键（或中键）拖动</b>平移视图，滚轮缩放，<b>适配视图</b>显示全部。</li>
+        <li><b>旋转</b>：选中后按 <kbd>R</kbd> 或右键菜单。<b>删除</b>：<kbd>Del</kbd> / 右键菜单。</li>
+        <li><b>开关 / 按键</b>：单击切换 / 按住导通。<b>时钟</b>：双击修改频率。<b>标签</b>：双击其他元件可添加标签。</li>
+      </ul>
+      <h4>电平与颜色</h4>
+      <ul>
+        <li><span class="sw v1"></span> 绿色 = 高电平(1)；<span class="sw v0"></span> 灰蓝 = 低电平(0)。</li>
+        <li><span class="sw vx"></span> 橙色 = 未知(X)：输入悬空、数据未知或多个输出冲突。</li>
+        <li><span class="sw vz"></span> 灰色虚线 = 高阻(Z)：三态输出未使能、网络无驱动。</li>
+        <li>未连接的输入按 X 处理；名称带 <code>~</code> 的低有效引脚（如 ~CLR、~OE、~G2A）读到的 X 视为"未动作"（相当于弱上拉）。</li>
+        <li>连线 / 上电时引擎会对输出为 X 的门电路做一次"上电扰动"，使纯反馈环路（如环形振荡器、锁存器）能够自启动。</li>
+      </ul>
+      <h4>运行控制</h4>
+      <ul>
+        <li><b>⏸ / ▶</b> 暂停或恢复时钟；暂停时手动切换开关信号仍会正常传播。</li>
+        <li><b>⏭ 步进</b>：每按一次使所有时钟源翻转半周期，便于逐拍观察计数器 / 触发器。</li>
+        <li><b>速度</b>：仿真时间倍率。状态栏显示仿真时间与累计事件数（事件数持续暴涨说明电路在振荡）。</li>
+      </ul>
+      <h4>快捷键</h4>
+      <ul class="keys">
+        <li><kbd>空格</kbd> 运行/暂停</li>
+        <li><kbd>R</kbd> 旋转选中</li>
+        <li><kbd>Del</kbd> 删除选中</li>
+        <li><kbd>Esc</kbd> 取消连线/取消选择</li>
+        <li><kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> 撤销/重做</li>
+        <li><kbd>Ctrl+D</kbd> 复制选中</li>
+      </ul>
+      <h4>保存</h4>
+      <ul>
+        <li>电路改动会<b>自动保存</b>在浏览器 localStorage 中；也可通过 文件 → 导出 / 导入 JSON 备份或分享。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+<input type="file" id="fileImport" accept=".json,application/json" hidden>
+<script src="js/engine.js?v=28"></script>
+<script src="js/chips.js?v=28"></script>
+<script src="js/examples.js?v=28"></script>
+<script src="js/breadboard.js?v=28"></script>
+<script src="js/pcb.js?v=28"></script>
+<script src="js/easyeda.js?v=28"></script>
+<script src="js/app.js?v=28"></script>
+</body>
+</html>
