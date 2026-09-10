@@ -1020,18 +1020,34 @@ function completeWire(hit) {
   if (nw) toast('已连接 ' + LIB[a.ch.type].type + '.' + a.pin.name + ' ↔ ' + LIB[hit.ch.type].type + '.' + hit.pin.name);
 }
 
+const ZOOM_LIM = { schematic: [0.15, 8], breadboard: [0.15, 8], pcb: [0.5, 20] };
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
   const r = canvas.getBoundingClientRect();
   const sx = e.clientX - r.left, sy = e.clientY - r.top;
-  const wx = (sx - r.width / 2) / app.cam.zoom + app.cam.x;
-  const wy = (sy - r.height / 2) / app.cam.zoom + app.cam.y;
-  const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-  app.cam.zoom = Math.min(2.5, Math.max(0.25, app.cam.zoom * f));
-  // 保持鼠标下的点不动
-  app.cam.x = wx - (sx - r.width / 2) / app.cam.zoom;
-  app.cam.y = wy - (sy - r.height / 2) / app.cam.zoom;
+  // 区分输入设备: 鼠标滚轮 = 行/页模式或大步进整数像素; 触控板 = 小步进连续像素
+  const line = e.deltaMode === 1 || e.deltaMode === 2;
+  const mouseWheel = !e.ctrlKey && (line || (Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50));
+  const [zmin, zmax] = ZOOM_LIM[app.mode] || [0.15, 8];
+  if (e.ctrlKey || mouseWheel) {
+    // 捏合缩放 (触控板双指捏合 = ctrl+滚轮) / 鼠标滚轮: 以光标为中心缩放
+    const wx = (sx - r.width / 2) / app.cam.zoom + app.cam.x;
+    const wy = (sy - r.height / 2) / app.cam.zoom + app.cam.y;
+    const dy = line ? e.deltaY * 16 : e.deltaY;
+    const f = Math.exp(-dy * 0.0022);          // 连续缩放, 与系统捏合手感一致
+    app.cam.zoom = Math.min(zmax, Math.max(zmin, app.cam.zoom * f));
+    // 保持鼠标下的点不动
+    app.cam.x = wx - (sx - r.width / 2) / app.cam.zoom;
+    app.cam.y = wy - (sy - r.height / 2) / app.cam.zoom;
+  } else {
+    // 触控板双指滑动: 平移视图, 内容跟手 (与 macOS 一致)
+    app.cam.x -= e.deltaX;
+    app.cam.y -= e.deltaY;
+  }
 }, { passive: false });
+// Safari 触控板捏合会发 gesture 事件: 阻止页面缩放
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t =>
+  document.addEventListener(t, e => e.preventDefault()));
 
 /* 标签/频率编辑统一走右键菜单"编辑标签…", 不再支持双击 */
 
