@@ -372,8 +372,8 @@ function drawIO(ch, def, z) {
   switch (ch.type) {
     case 'SW': {
       const on = ch.state.on ? true : false;
-      // 居中滑轨 (56 宽, 主体中心)
-      rr(-28, -7, 56, 14, 7);
+      // 居中滑轨 (40 宽, 主体中心)
+      rr(-20, -7, 40, 14, 7);
       ctx.fillStyle = on ? 'rgba(15,157,88,.22)' : '#e0e6ec';
       ctx.fill();
       ctx.strokeStyle = on ? COL.v1 : '#9aa7b3';
@@ -381,7 +381,7 @@ function drawIO(ch, def, z) {
       ctx.stroke();
       // 滑块
       ctx.beginPath();
-      ctx.arc(on ? 18 : -18, 0, 6, 0, Math.PI * 2);
+      ctx.arc(on ? 14 : -14, 0, 6, 0, Math.PI * 2);
       ctx.fillStyle = on ? COL.v1 : '#8a97a5';
       ctx.fill();
       // 状态字 (顶部居中) / 名称 (底部居中)
@@ -421,17 +421,16 @@ function drawIO(ch, def, z) {
       ctx.lineWidth = 1.8;
       ctx.lineJoin = 'round';
       ctx.beginPath();
-      const bx = -32, by = 4;   // 波形以元件中心居中
-      ctx.moveTo(bx, by - 12 + 12);
-      ctx.lineTo(bx + 12, by - 12 + 12);
-      ctx.lineTo(bx + 12, by - 12);
-      ctx.lineTo(bx + 26, by - 12);
-      ctx.lineTo(bx + 26, by);
-      ctx.lineTo(bx + 40, by);
-      ctx.lineTo(bx + 40, by - 12);
-      ctx.lineTo(bx + 54, by - 12);
-      ctx.lineTo(bx + 54, by);
-      ctx.lineTo(bx + 64, by);
+      const bx = -20, by = 0;   // 紧凑波形 (40 宽) 以元件中心居中
+      ctx.moveTo(bx, by + 4);
+      ctx.lineTo(bx + 10, by + 4);
+      ctx.lineTo(bx + 10, by - 8);
+      ctx.lineTo(bx + 20, by - 8);
+      ctx.lineTo(bx + 20, by + 4);
+      ctx.lineTo(bx + 30, by + 4);
+      ctx.lineTo(bx + 30, by - 8);
+      ctx.lineTo(bx + 40, by - 8);
+      ctx.lineTo(bx + 40, by + 4);
       ctx.stroke();
       ctx.font = '10px Consolas, monospace';
       ctx.fillStyle = '#43566a';

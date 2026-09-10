@@ -474,17 +474,17 @@ def('74245', '八路总线收发器', '总线接口', [
 /* ========================= 输入 / 输出元件 ========================= */
 
 def('SW', '开关(单击切换)', '输入/输出', [R(1, 'Q', 'out')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 112, h: 56 },
+  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { const p = ch.pinByNum[1]; p.driven = ch.state.on ? 1 : 0; },
 });
 
 def('BTN', '按键(按住=1)', '输入/输出', [R(1, 'Q', 'out')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 112, h: 56 },
+  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 0; },
 });
 
 def('CLOCK', '时钟源(右键改频率)', '输入/输出', [R(1, 'CLK', 'out')], {
-  custom: true, fixedRot: true, hideNums: true, size: { w: 112, h: 56 },
+  custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   defaults: { freq: 2 },
   init(ch) { ch.state.phase = ch.state.phase || 0; ch.pinByNum[1].driven = ch.state.phase ? 1 : 0; },
 });
