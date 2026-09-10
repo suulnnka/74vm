@@ -798,7 +798,7 @@ const LS_KEY = '74vm:autosave';
 let saveTimerId = 0;
 function scheduleSave() {
   clearTimeout(saveTimerId);
-  saveTimerId = setTimeout(doSave, 700);
+  saveTimerId = setTimeout(() => doSave(true), 700);
   syncSchematicWires();
 }
 function doSave(silent) {
