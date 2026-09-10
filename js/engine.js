@@ -434,7 +434,20 @@ class Engine {
     return Math.max(1, Math.round(500000 / f));
   }
 
+  /** 无稳态元件半周期(µs): lib.osc.half 可覆盖默认 freq 换算 */
+  oscHalf(ch) {
+    const d = this.lib[ch.type];
+    return d && d.osc && d.osc.half ? d.osc.half(ch) : this.clockHalf(ch);
+  }
+
+  /** 触发一个无稳态源: lib.osc.tick 自定义翻转, 否则默认 CLOCK 相位翻转 */
   fireClock(ch) {
+    const d = this.lib[ch.type];
+    if (d && d.osc && d.osc.tick) {
+      d.osc.tick(ch, this);
+      ch.state.nextT = this.simTime + this.oscHalf(ch);
+      return;
+    }
     const s = ch.state;
     s.phase = s.phase ? 0 : 1;
     s.nextT = this.simTime + this.clockHalf(ch);
@@ -448,12 +461,13 @@ class Engine {
     const target = this.simTime + dtUs;
     for (let guard = 0; guard < 2000000; guard++) {
       this.processQueue(target, this.FRAME_CAP);
-      // 找最早到期的时钟 (未供电的时钟不振荡)
+      // 找最早到期的无稳态源 (未供电不振荡)
       let c = null, best = Infinity;
       for (const ch of this.chips.values()) {
-        if (ch.type !== 'CLOCK' || ch.powered === false) continue;
+        const d = this.lib[ch.type];
+        if (!d.osc || ch.powered === false) continue;
         if (ch.state.nextT == null)
-          ch.state.nextT = this.simTime + this.clockHalf(ch);
+          ch.state.nextT = this.simTime + this.oscHalf(ch);
         if (ch.state.nextT < best) { best = ch.state.nextT; c = ch; }
       }
       if (!c || best > target) break;
@@ -463,11 +477,11 @@ class Engine {
     this.processQueue(target, this.FRAME_CAP);
   }
 
-  /** 步进: 翻转所有时钟半周期并结算, 返回触发的时钟数 */
+  /** 步进: 翻转所有无稳态源半周期并结算, 返回触发的数量 */
   stepClocks() {
     let fired = 0;
     for (const ch of this.chips.values()) {
-      if (ch.type !== 'CLOCK' || ch.powered === false) continue;
+      if (!this.lib[ch.type].osc || ch.powered === false) continue;
       this.fireClock(ch);
       fired++;
     }

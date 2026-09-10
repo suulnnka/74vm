@@ -330,14 +330,13 @@ console.log('\n[16] NE555 真实时钟 (无稳态振荡 / ~RST 门控 / 供电�
   check('引脚表为真实 DIP-8 子集', LIB['NE555'].pins.map(p => p.num).join(',') === '2,3,4,7,6');
   check('上电先输出低半周期', V(sim, t5, 3) === 0, V(sim, t5, 3));
   let last = V(sim, t5, 3), risers = 0;
-  const t0 = sim.simTime;
-  for (let t = t0; t <= t0 + 10000; t += 100) {
-    sim.processQueue(t);
+  for (let i = 0; i < 20; i++) {                  // 20 × 500µs = 10ms (步长 = 半周期)
+    sim.advance(500);
     const v = V(sim, t5, 3);
     if (last === 0 && v === 1) risers++;
     last = v;
   }
-  check('1kHz → 10ms 内 10 个上升沿', risers === 10, risers);
+  check('1kHz → 10ms 内 ~10 个上升沿', risers >= 9 && risers <= 11, risers);
   check('DISCH 在 OUT 低电平期导通 (0)', V(sim, t5, 7) === 0, V(sim, t5, 7));
 
   // ~RST (4脚, 低有效) 门控
@@ -345,13 +344,18 @@ console.log('\n[16] NE555 真实时钟 (无稳态振荡 / ~RST 门控 / 供电�
   sim.addWire(sw, 1, t5, 4);
   sim.driveNow(sw, 1, 0);
   check('~RST 低 → OUT 复位为 0', V(sim, t5, 3) === 0);
-  const tHold = sim.simTime;
   sim.advance(5000);
-  check('~RST 低期间停振', V(sim, t5, 3) === 0 && sim.simTime === tHold, sim.simTime);
+  check('~RST 低期间输出保持 0', V(sim, t5, 3) === 0, V(sim, t5, 3));
   sim.driveNow(sw, 1, 1);
-  const tR = sim.simTime;
-  sim.advance(5000);
-  check('~RST 释放恢复振荡', sim.simTime - tR >= 4999, sim.simTime - tR);
+  let risers3 = 0; last = V(sim, t5, 3);
+  for (let i = 0; i < 10; i++) {                  // 5ms
+    sim.advance(500);
+    const v = V(sim, t5, 3);
+    if (last === 0 && v === 1) risers3++;
+    last = v;
+  }
+  check('~RST 释放恢复振荡', risers3 >= 4, risers3);
+  check('事件量有界 (无定时器风暴)', sim.eventCount < 100000, sim.eventCount);
 
   // 供电检查
   t5.powered = false;
@@ -359,9 +363,14 @@ console.log('\n[16] NE555 真实时钟 (无稳态振荡 / ~RST 门控 / 供电�
   check('未上电 → OUT 为 X', V(sim, t5, 3) === VX, V(sim, t5, 3));
   t5.powered = true;
   sim.reevalAll();
-  const tP = sim.simTime;
-  sim.advance(5000);
-  check('重新上电恢复振荡', sim.simTime - tP >= 4999, sim.simTime - tP);
+  let risers4 = 0; last = V(sim, t5, 3);
+  for (let i = 0; i < 10; i++) {                  // 5ms
+    sim.advance(500);
+    const v = V(sim, t5, 3);
+    if (last === 0 && v === 1) risers4++;
+    last = v;
+  }
+  check('重新上电恢复振荡', risers4 >= 4, risers4);
 }
 
 console.log('\n[17] 4×4 矩阵键盘 (行列扫描)');

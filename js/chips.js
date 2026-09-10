@@ -485,6 +485,7 @@ def('BTN', '按键·按住=1', '输入/输出', [R(1, 'Q', 'out')], {
 
 def('CLOCK', '时钟源·右键改频率', '输入/输出', [R(1, 'CLK', 'out')], {
   custom: true, hideNums: true, size: { w: 56, h: 56 },
+  osc: {},                                  // 无稳态源: 引擎按帧扫描推进 (见 engine.advance)
   defaults: { freq: 2 },
   init(ch) { ch.state.phase = ch.state.phase || 0; ch.pinByNum[1].driven = ch.state.phase ? 1 : 0; },
 });
@@ -493,39 +494,23 @@ def('CLOCK', '时钟源·右键改频率', '输入/输出', [R(1, 'CLK', 'out')]
  * 数字化抽象: OUT 按 freq 50% 占空比翻转 (~RST 低电平停振并复位),
  * DISCH 为真实放电管行为 (OUT 低电平期导通=0, 高电平期截止=Z);
  * TRIG/THRES 在无稳态下由外部 RC 驱动, 数字模型不单独建模。 */
-function ne555Half(ch) {
-  return Math.max(1, Math.round(500000 / (Number(ch.props.freq) || 2)));
-}
-function ne555Tick(ch, e) {
-  const t = ch._ne555;
-  if (!t || !t.on) return;
-  if (ch.powered === false) { t.on = false; return; }
-  t.hi = t.hi ? 0 : 1;
-  e.drive(3, t.hi ? V1 : V0, 0);
-  e.drive(7, t.hi ? VZ : V0, 0);
-  e.schedule(ne555Half(ch), () => ne555Tick(ch, e));
+function ne555OscTick(ch, eng) {
+  ch.state.hi = (eng.readPin(ch, 4) === V0) ? 0 : (ch.state.hi ? 0 : 1);   // ~RST 低: 强制低
+  eng.applyPin(ch.pinByNum[3], ch.state.hi ? V1 : V0);
+  eng.applyPin(ch.pinByNum[7], ch.state.hi ? VZ : V0);
 }
 def('NE555', 'NE555 定时器·时钟(右键改频率)', '输入/输出', [
   L(2, 'TRIG', 'in'), L(3, 'OUT', 'out'), L(4, '~RST', 'in'),
   R(7, 'DISCH', 'out'), R(6, 'THRES', 'in'),
 ], {
   pwr: { vcc: 8, gnd: 1 },                  // 真实电源脚位 (非 74 系列约定)
+  osc: { tick: ne555OscTick },
   defaults: { freq: 2 },
+  init(ch) { ch.state.hi = 0; ch.pinByNum[3].driven = V0; ch.pinByNum[7].driven = V0; },
   eval(ch, e) {
-    const t = ch._ne555 || (ch._ne555 = { on: false, hi: 0 });
-    if (ch.powered === false || e.readLo(4)) {          // 未供电 / ~RST 低: 复位停振
-      t.on = false;
-      e.drive(3, V0, 0);
-      e.drive(7, V0, 0);
-      return;
-    }
-    if (!t.on) {                                        // 启动/恢复振荡: 先输出低半周期
-      t.on = true;
-      t.hi = 0;
-      e.drive(3, V0, 0);
-      e.drive(7, V0, 0);
-      e.schedule(ne555Half(ch), () => ne555Tick(ch, e));
-    }
+    if (ch.powered === false || e.readLo(4)) ch.state.hi = 0;   // ~RST 低: 立即复位
+    e.drive(3, ch.state.hi ? V1 : V0, 0);                       // 重申相位 (结构变化后)
+    e.drive(7, ch.state.hi ? VZ : V0, 0);
   },
 });
 
