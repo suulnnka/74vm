@@ -281,83 +281,97 @@ console.log('[10] 原理图元件尺寸均为偶数格 (56px 倍数, 边框压�
   check('IO 元件声明尺寸全部 56 倍数', ok, bad);
 }
 
-console.log('\n[8] ROM / RAM 存储器');
+console.log('\n[8] 存储器 (74187 / 74S472 / 74189 / 6116)');
 {
   const sim = new Engine(LIB);
-  // 地址总线: SW×8 → A0..A7 (ROM 与 RAM 共用)
-  const addrSw = [];
-  for (let i = 0; i < 8; i++) {
-    const s = sim.addChip('SW', 0, 0);
-    addrSw.push(s);
-  }
-  const rom = sim.addChip('ROM', 0, 0);
-  const ram = sim.addChip('RAM', 0, 0);
-  for (let i = 0; i < 8; i++) {
-    sim.addWire(addrSw[i], 1, rom, i + 1);
-    sim.addWire(addrSw[i], 1, ram, i + 1);
-  }
-  // 数据总线: SW×8 → RAM D0..D7 (写通道); RAM/ROM 输出读回用 pinDisplay
-  const dataSw = [];
-  for (let i = 0; i < 8; i++) {
-    const s = sim.addChip('SW', 0, 0);
-    dataSw.push(s);
-    sim.addWire(s, 1, ram, 11 + i);
-  }
-  const csSw = sim.addChip('SW', 0, 0), weSw = sim.addChip('SW', 0, 0);
-  sim.addWire(csSw, 1, ram, 10);
-  sim.addWire(weSw, 1, ram, 9);
-  const setBus = (sws, v) => { for (let i = 0; i < 8; i++) sim.driveNow(sws[i], 1, (v >> i) & 1); };
-  /** 读回前断开/恢复数据开关 (模拟真实系统释放写总线) */
-  let dataWires = [];
-  const detachData = () => {
-    dataWires = [...sim.wires].filter(w => w.a.chip === ram && w.a.num >= 11 || w.b.chip === ram && w.b.num >= 11);
-    for (const w of dataWires) sim.removeWire(w.id);
+  // 用开关驱动所有控制/地址/数据脚 (无网络的引脚不会触发重评估, 必须真实连线)
+  let swSeq = 0;
+  const swBus = (chip, pins) => {
+    const sws = [];
+    for (let i = 0; i < pins.length; i++) {
+      const s = sim.addChip('SW', 0, 0, 0, { _seq: ++swSeq });
+      sws.push(s);
+      sim.addWire(s, 1, chip, pins[i]);
+    }
+    const set = v => { for (let i = 0; i < sws.length; i++) sim.driveNow(sws[i], 1, (v >> i) & 1); };
+    return { sws, set };
   };
-  const attachData = () => { for (let i = 0; i < 8; i++) sim.addWire(dataSw[i], 1, ram, 11 + i); };
-  const readD = (chip) => {
+  const readD = (chip, pins) => {
     let v = 0;
-    for (let i = 0; i < 8; i++) if (sim.pinDisplay(chip.pinByNum[(chip.type === 'ROM' ? 9 : 11) + i]) === 1) v |= 1 << i;
+    for (let i = 0; i < pins.length; i++) if (sim.pinDisplay(chip.pinByNum[pins[i]]) === 1) v |= 1 << i;
     return v;
   };
 
-  // ROM 出厂内容 = 地址 (identity)
-  setBus(addrSw, 0xA5);
-  check('ROM 地址 0xA5 读出 0xA5 (出厂=地址)', readD(rom) === 0xA5, readD(rom));
+  // 74187 — ROM 256×4, 出厂内容 = 地址低 4 位
+  const rom = sim.addChip('74187', 0, 0);
+  const romA = swBus(rom, LIB['74187'].mem.addr);
+  romA.set(0xA5);
+  check('74187 地址 0xA5 读出 0x5 (出厂=地址低4位)', readD(rom, LIB['74187'].mem.data) === 0x05);
 
-  // RAM 写: CS=1 WE=1, 地址 0x3C 写入 0x5F
-  setBus(addrSw, 0x3C);
-  setBus(dataSw, 0x5F);
-  sim.driveNow(csSw, 1, 1);
-  sim.driveNow(weSw, 1, 1);
-  // 读回: 断开写总线 → WE=0 → RAM 驱动数据线
-  detachData();
-  sim.driveNow(weSw, 1, 0);
-  check('RAM 写 0x5F @0x3C 后读回 0x5F', readD(ram) === 0x5F, readD(ram));
+  // 74189 — RAM 16×4, /CS /WE 低有效, /WE=1 写
+  const ram = sim.addChip('74189', 0, 0);
+  const ramA = swBus(ram, LIB['74189'].mem.addr);
+  const ramD = swBus(ram, LIB['74189'].mem.data);
+  const ramCS = swBus(ram, [5]), ramWE = swBus(ram, [6]);
+  ramA.set(0x3); ramD.set(0x9);
+  ramCS.set(0);                     // /CS=0 选中
+  ramWE.set(1);                     // /WE=1 写入
+  // 读回: 断开数据开关 (模拟总线释放) → /WE=0 → RAM 驱动数据线
+  const dataWires = [...sim.wires].filter(w =>
+    (w.a.chip === ram && w.a.num >= 7) || (w.b.chip === ram && w.b.num >= 7));
+  for (const w of dataWires) sim.removeWire(w.id);
+  ramWE.set(0);
+  check('74189 写 0x9 @3 后读回 0x9', readD(ram, LIB['74189'].mem.data) === 0x9);
+  ramCS.set(1);                     // /CS=1 未选中
+  check('74189 未选中数据线高阻', sim.pinDisplay(ram.pinByNum[7]) === 'Z');
 
-  // 再写另一地址后切回, 内容不丢
-  attachData();
-  setBus(addrSw, 0x10);
-  setBus(dataSw, 0x77);
-  sim.driveNow(weSw, 1, 1);
-  sim.driveNow(weSw, 1, 0);
-  detachData();
-  check('RAM 地址 0x10 读回 0x77', readD(ram) === 0x77, readD(ram));
-  setBus(addrSw, 0x3C);
-  check('RAM 地址 0x3C 内容仍为 0x5F', readD(ram) === 0x5F, readD(ram));
+  // 74S472 — PROM 512×8, /CE=10 低有效使能输出
+  const pr = sim.addChip('74S472', 0, 0);
+  const prA = swBus(pr, LIB['74S472'].mem.addr);
+  const prCE = swBus(pr, [10]);
+  prA.set(0x101);
+  prCE.set(0);                      // /CE=0 使能
+  check('74S472 地址 0x101 读出 0x01', readD(pr, LIB['74S472'].mem.data) === 0x01);
+  prCE.set(1);                      // /CE=1
+  check('74S472 /CE=1 输出高阻', sim.pinDisplay(pr.pinByNum[11]) === 'Z');
 
-  // CS=0 时数据线高阻 (不驱动总线)
-  sim.driveNow(csSw, 1, 0);
-  const d0 = sim.pinDisplay(ram.pinByNum[11]);
-  check('RAM 未选中 (CS=0) 数据线高阻', d0 === 'Z', d0);
+  // 6116 — SRAM 2K×8, /CS /OE /WE 低有效, /WE=0 写
+  const sr = sim.addChip('6116', 0, 0);
+  const srA = swBus(sr, LIB['6116'].mem.addr);
+  const srD = swBus(sr, LIB['6116'].mem.data);
+  const srCS = swBus(sr, [21]), srOE = swBus(sr, [22]), srWE = swBus(sr, [12]);
+  srA.set(0x7FF); srD.set(0x5A);
+  srCS.set(0); srOE.set(0);
+  srWE.set(0);                      // /WE=0 写入
+  srWE.set(1);                      // /WE=1 读
+  check('6116 写 0x5A @0x7FF 读回 0x5A', readD(sr, LIB['6116'].mem.data) === 0x5A);
 
-  // ROM/RAM 内容经 JSON 序列化保持
+  // 内容随存档保存
   const saved = JSON.parse(JSON.stringify({
     chips: Array.from(sim.chips.values()).map(c => ({ type: c.type, props: c.props })),
   }));
-  const romSaved = saved.chips.find(c => c.type === 'ROM');
-  const ramSaved = saved.chips.find(c => c.type === 'RAM');
-  check('ROM 出厂内容随存档保存 (0xA5=0xA5)', romSaved.props.mem[0xA5] === 0xA5);
-  check('RAM 写入内容随存档保存 (0x3C=0x5F)', ramSaved.props.mem[0x3C] === 0x5F);
+  check('74189 内容随存档保存', saved.chips.find(c => c.type === '74189').props.mem[3] === 0x9);
+  check('6116 内容随存档保存', saved.chips.find(c => c.type === '6116').props.mem[0x7FF] === 0x5A);
+
+  // 旧通用型号迁移: ROM→74187 / RAM→6116
+  const legacy = { chips: [
+    { type: 'ROM', props: { mem: new Array(256).fill(0xAB) } },
+    { type: 'RAM', props: { mem: new Array(256).fill(0) } },
+  ], wires: [] };
+  const MEM_ALIAS = { ROM: '74187', RAM: '6116' };
+  for (const c of legacy.chips) {
+    if (!MEM_ALIAS[c.type]) continue;
+    const nm = MEM_ALIAS[c.type];
+    const m = LIB[nm].mem;
+    const old = c.props && Array.isArray(c.props.mem) ? c.props.mem : [];
+    const mem = new Array(m.size).fill(0);
+    for (let i = 0; i < Math.min(old.length, m.size); i++) mem[i] = old[i] & m.mask;
+    c.type = nm;
+    c.props = Object.assign({}, c.props, { mem });
+  }
+  const mRom = legacy.chips[0], mRam = legacy.chips[1];
+  check('旧 ROM 迁移为 74187 且内容按掩码截取', mRom.type === '74187' && mRom.props.mem[0xAB] === 0x0B);
+  check('旧 RAM 迁移为 6116 且补零到 2048', mRam.type === '6116' && mRam.props.mem.length === 2048);
 }
 
 console.log(`结果: ${pass} 通过, ${fail} 失败`);

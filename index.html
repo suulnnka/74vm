@@ -49,7 +49,7 @@
         <li><b>移动 / 视图</b>：<b>左键拖动元件</b>移动；<b>右键（或中键）拖动</b>平移视图，滚轮缩放，触控板<b>双指滑动平移、捏合缩放</b>（与 macOS 一致），<b>适配视图</b>显示全部。</li>
         <li><b>旋转</b>：选中后按 <kbd>R</kbd> 或右键菜单。<b>删除</b>：<kbd>Del</kbd> / 右键菜单。</li>
         <li><b>开关 / 按键</b>：单击切换 / 按住导通。<b>标签 / 时钟频率</b>：右键元件 → <b>编辑标签…</b>。</li>
-        <li><b>存储器</b>：<b>ROM</b> (256×8) 右键 → 编辑内容 / 导出 (十六进制，可粘贴导入)；<b>RAM</b> (256×8, CS/WE 高有效) 右键 → 获取快照 / 导出。地址悬空按 0。</li>
+        <li><b>存储器</b>：<b>74187</b> ROM 256×4、<b>74S472</b> PROM 512×8（右键 → 编辑内容 / 导出，十六进制可粘贴导入）；<b>74189</b> RAM 16×4、<b>6116</b> SRAM 2K×8（右键 → 获取快照 / 导出）。/CE、/CS、/WE、/OE 低有效，地址悬空按 0。</li>
       </ul>
       <h4>电平与颜色</h4>
       <ul>
@@ -82,13 +82,13 @@
   </div>
 </div>
 <input type="file" id="fileImport" accept=".json,application/json" hidden>
-<script src="js/engine.js?v=44"></script>
-<script src="js/chips.js?v=44"></script>
-<script src="js/examples.js?v=44"></script>
-<script src="js/breadboard.js?v=44"></script>
-<script src="js/pcb.js?v=44"></script>
-<script src="js/easyeda.js?v=44"></script>
-<script src="js/dialog.js?v=44"></script>
-<script src="js/app.js?v=44"></script>
+<script src="js/engine.js?v=45"></script>
+<script src="js/chips.js?v=45"></script>
+<script src="js/examples.js?v=45"></script>
+<script src="js/breadboard.js?v=45"></script>
+<script src="js/pcb.js?v=45"></script>
+<script src="js/easyeda.js?v=45"></script>
+<script src="js/dialog.js?v=45"></script>
+<script src="js/app.js?v=45"></script>
 </body>
 </html>

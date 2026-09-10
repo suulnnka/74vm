@@ -8,7 +8,7 @@
  *   - Chip  : 元件实例, 引脚带驱动值 driven (0/1/Z/X)
  *   - Net   : 由导线连接的引脚集合, 值 = 所有驱动引脚的合并
  *             (无驱动→Z, 有0有1→X, 有X→X)
- *   - 事件队列(最小堆, 按 (t, seq) 排序): 'pin' 驱动变更 / 'eval' 重新求值
+ *   - 事件队列(最小堆, 按 (t, seq) 排序): 'pin' 驱动变更 / 'eval' 重新求值 / 'timer' 定时回调
  *   - 时钟源由 advance() 在主循环中按 nextT 逐沿触发
  * ========================================================================= */
 (function (global) {
@@ -319,6 +319,8 @@ class Engine {
       readHi(n) { return eng.readPin(ch, n) === V1; },  // 高有效: 仅确定高电平才算动作
       drive(n, v, delay) { eng.drivePin(ch, n, v, delay); },
       notv(v) { return (v === VX || v === VZ) ? VX : (v ? V0 : V1); },
+      /** 定时回调: us 微秒后执行 fn (与网络变化无关, 供主动型元件自驱动) */
+      schedule(us, fn) { eng.scheduleTimer(us, fn); },
     };
   }
 
@@ -340,6 +342,11 @@ class Engine {
     const p = ch.pinByNum[n];
     if (!p || p.driven === v) return;
     this.q.push({ t: this.simTime + (delay == null ? 2 : delay), seq: ++this.seq, kind: 'pin', ch, p, v });
+  }
+
+  /** 定时回调事件 */
+  scheduleTimer(us, fn) {
+    this.q.push({ t: this.simTime + (us || 0), seq: ++this.seq, kind: 'timer', fn });
   }
 
   /** 元件求值: 门表或自定义 eval */
@@ -403,6 +410,7 @@ class Engine {
       if (e.t > this.simTime) this.simTime = e.t;
       this.eventCount++;
       if (e.kind === 'pin') this.applyPin(e.p, e.v);
+      else if (e.kind === 'timer') { try { e.fn(); } catch (err) { console.error('定时器回调错误:', err); } }
       else this.evalChip(e.ch);
       if (++n >= cap) { this.overload = true; break; }
     }

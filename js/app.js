@@ -749,6 +749,18 @@ function buildSave(withView = true) {
 
 function restoreSave(data) {
   if (!data || !Array.isArray(data.chips)) return;
+  // 旧通用型号迁移: ROM→74187, RAM→6116 (内容按新位宽掩码截取; 接线需按新引脚复查)
+  const MEM_ALIAS = { ROM: '74187', RAM: '6116' };
+  for (const c of data.chips) {
+    if (!MEM_ALIAS[c.type]) continue;
+    const nm = MEM_ALIAS[c.type];
+    const m = LIB[nm].mem;
+    const old = c.props && Array.isArray(c.props.mem) ? c.props.mem : [];
+    const mem = new Array(m.size).fill(0);
+    for (let i = 0; i < Math.min(old.length, m.size); i++) mem[i] = old[i] & m.mask;
+    c.type = nm;
+    c.props = Object.assign({}, c.props, { mem });
+  }
   sim.load({ chips: data.chips, wires: data.wires || [], time: data.time || 0 });
   // 旧存档坐标吸附到 28px 主网格 (连线跟随引脚, 无需修正)
   for (const ch of sim.chips.values()) { ch.x = snap(ch.x); ch.y = snap(ch.y); }
@@ -2279,55 +2291,56 @@ function bbRotateSelection() {
   }
 }
 
-/* ---------- ROM/RAM 存储器: 十六进制内容编辑 / 快照 / 导入导出 ---------- */
+/* ---------- 存储器 (74187/74S472/74189/6116…): 十六进制内容编辑 / 快照 / 导入导出 ---------- */
 
-const MEM_SIZE = 256;
 function memToHex(mem) {
   const out = [];
-  for (let r = 0; r < MEM_SIZE; r += 16) {
+  for (let r = 0; r < mem.length; r += 16) {
     out.push(Array.from(mem.slice(r, r + 16), b => (b & 0xFF).toString(16).padStart(2, '0').toUpperCase()).join(' '));
   }
   return out.join('\n');
 }
-/** 解析十六进制字节流 (容忍 0x 前缀/逗号/换行), 无效返回 null; 不足 256 补 00 */
-function parseHexMem(s) {
+/** 解析十六进制字节流 (容忍 0x 前缀/逗号/换行), 无效返回 null; 不足 size 补 00, 超出截断 */
+function parseHexMem(s, size, mask) {
   const toks = String(s).replace(/0[xX]/g, '').split(/[\s,]+/).filter(t => t);
   if (!toks.length) return null;
   const bytes = [];
   for (const t of toks) {
     if (!/^[0-9a-fA-F]{1,2}$/.test(t)) return null;
-    bytes.push(parseInt(t, 16));
+    bytes.push(parseInt(t, 16) & mask);
   }
-  const mem = new Array(MEM_SIZE).fill(0);
-  for (let i = 0; i < Math.min(bytes.length, MEM_SIZE); i++) mem[i] = bytes[i];
+  const mem = new Array(size).fill(0);
+  for (let i = 0; i < Math.min(bytes.length, size); i++) mem[i] = bytes[i];
   return mem;
 }
+function memCfg(ch) { return LIB[ch.type] && LIB[ch.type].mem; }
 function memChipName(ch) {
   return ch.props.label ? ch.props.label : ch.type + '#' + ch.id;
 }
-function editRom(ch) {
+function editMem(ch) {
+  const m = memCfg(ch);
   Dialog.prompt({
-    title: 'ROM 内容 — ' + memChipName(ch) + ' (256×8)',
+    title: ch.type + ' 内容 — ' + memChipName(ch) + ' (' + m.size + '×' + (m.mask >= 0xFF ? 8 : 4) + ')',
     label: '每字节 2 位十六进制, 空格分隔 (每行 16 字节). 可直接粘贴导入, 不足部分补 00:',
     value: memToHex(ch.props.mem || []),
     multiline: true,
     okText: '写入',
-    validate: s => parseHexMem(s) == null ? '格式无效: 只允许十六进制字节 (00 ~ FF)' : null,
+    validate: s => parseHexMem(s, m.size, m.mask) == null ? '格式无效: 只允许十六进制字节 (00 ~ FF)' : null,
   }).then(s => {
     if (s == null) return;
     pushUndo();
-    ch.props.mem = parseHexMem(s);
+    ch.props.mem = parseHexMem(s, m.size, m.mask);
     sim.touch();
     sim.reevalAll();   // 内容变化不经过引脚事件, 需重评估全部元件
     scheduleSave();
-    toast('ROM 内容已写入');
+    toast(ch.type + ' 内容已写入');
   });
 }
 function memSnapshot(ch) {
   const hex = memToHex(ch.props.mem || []);
   Dialog.prompt({
-    title: 'RAM 快照 — ' + memChipName(ch),
-    message: '当前 256 字节内容 (已尝试复制到剪贴板):',
+    title: ch.type + ' 快照 — ' + memChipName(ch),
+    message: '当前 ' + ch.props.mem.length + ' 字节内容 (已尝试复制到剪贴板):',
     value: hex, multiline: true, okText: '关闭',
   });
   if (navigator.clipboard) {
@@ -2340,17 +2353,18 @@ function exportMem(ch) {
   downloadBlob(memToHex(ch.props.mem || []), fn);
   toast('已导出 ' + fn);
 }
-/** 右键菜单追加项: ROM 编辑/导出, RAM 快照/导出 */
+/** 右键菜单追加项: ROM 类编辑/导出, RAM 类快照/导出 (按 mem 配置识别) */
 function memoryMenuItems(ch) {
-  if (ch.type === 'ROM') return [
-    { text: '编辑内容 (十六进制)…', fn: () => editRom(ch) },
+  const m = memCfg(ch);
+  if (!m) return [];
+  if (m.kind === 'rom') return [
+    { text: '编辑内容 (十六进制)…', fn: () => editMem(ch) },
     { text: '导出内容 (十六进制文件)', fn: () => exportMem(ch) },
   ];
-  if (ch.type === 'RAM') return [
+  return [
     { text: '获取快照 (十六进制)…', fn: () => memSnapshot(ch) },
     { text: '导出快照 (十六进制文件)', fn: () => exportMem(ch) },
   ];
-  return [];
 }
 
 function editLabelOrFreq(ch) {

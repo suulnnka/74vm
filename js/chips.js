@@ -327,7 +327,7 @@ def('74175', '四D触发器', '触发器/锁存', [
 });
 
 /* 74374 八D触发器 (三态输出) */
-def('74374', '八D触发器(三态)', '触发器/锁存', [
+def('74374', '八D触发器·三态', '触发器/锁存', [
   L(1, '~OE', 'in'), L(2, 'D1', 'in'), L(3, 'D2', 'in'), L(4, 'D3', 'in'), L(5, 'D4', 'in'), L(6, 'D5', 'in'), L(7, 'D6', 'in'), L(8, 'D7', 'in'), L(9, 'D8', 'in'),
   R(19, 'Q1', 'io'), R(18, 'Q2', 'io'), R(17, 'Q3', 'io'), R(16, 'Q4', 'io'), R(15, 'Q5', 'io'), R(14, 'Q6', 'io'), R(13, 'Q7', 'io'), R(12, 'Q8', 'io'), R(11, 'CK', 'in'),
 ], {
@@ -473,17 +473,17 @@ def('74245', '八路总线收发器', '总线接口', [
 
 /* ========================= 输入 / 输出元件 ========================= */
 
-def('SW', '开关(单击切换)', '输入/输出', [R(1, 'Q', 'out')], {
+def('SW', '开关·单击切换', '输入/输出', [R(1, 'Q', 'out')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { const p = ch.pinByNum[1]; p.driven = ch.state.on ? 1 : 0; },
 });
 
-def('BTN', '按键(按住=1)', '输入/输出', [R(1, 'Q', 'out')], {
+def('BTN', '按键·按住=1', '输入/输出', [R(1, 'Q', 'out')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 0; },
 });
 
-def('CLOCK', '时钟源(右键改频率)', '输入/输出', [R(1, 'CLK', 'out')], {
+def('CLOCK', '时钟源·右键改频率', '输入/输出', [R(1, 'CLK', 'out')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   defaults: { freq: 2 },
   init(ch) { ch.state.phase = ch.state.phase || 0; ch.pinByNum[1].driven = ch.state.phase ? 1 : 0; },
@@ -493,89 +493,196 @@ def('LED', 'LED 指示灯', '输入/输出', [L(1, 'IN', 'in')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
 });
 
-def('SEG7', '七段数码管(共阴)', '输入/输出', [
+def('SEG7', '七段数码管·共阴', '输入/输出', [
   L(1, 'a', 'in'), L(2, 'b', 'in'), L(3, 'c', 'in'), L(4, 'd', 'in'),
   L(5, 'e', 'in'), L(6, 'f', 'in'), L(7, 'g', 'in'), L(8, 'dp', 'in'),
 ], { custom: true, fixedRot: true, hideNums: true, size: { w: 168 } });
 
-def('PROBE', '逻辑探针(显示电平)', '输入/输出', [L(1, 'IN', 'in')], {
+def('PROBE', '逻辑探针·显示电平', '输入/输出', [L(1, 'IN', 'in')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
 });
 
-def('VCC', '电源 +5V(恒1)', '输入/输出', [R(1, '5V', 'out')], {
+def('VCC', '电源 +5V·恒1', '输入/输出', [R(1, '5V', 'out')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 1; },
 });
 
-def('GND', '地 GND(恒0)', '输入/输出', [R(1, 'GND', 'out')], {
+def('GND', '地 GND·恒0', '输入/输出', [R(1, 'GND', 'out')], {
   custom: true, fixedRot: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 0; },
 });
 
-/* ========================= 存储器 ========================= */
+/* ---------------- PS/2 键盘 ----------------
+ * 点击元件聚焦后用真实键盘打字, 按标准 PS/2 协议在 CLK/DATA 上串行发送:
+ *   帧 = 起始位0 + 8数据位(LSB在前) + 奇校验位 + 停止位1, 共 11 个时钟脉冲
+ *   键盘主动产生 ~16.7kHz 时钟 (半周期 30µs); DATA 在 CLK 高电平期间建立,
+ *   CLK 低电平期间保持稳定 → 主机在 CLK 下降沿或上升沿采样均可
+ * 扫描码为 PS/2 默认的 Set 2: 按下发 Make 码, 松开发 Break 码 (0xF0 + Make),
+ * 扩展键 (方向键/右 Ctrl 等) 前缀 0xE0; CapsLock 按下/松开都发 Make (无 Break)
+ * 键位按 e.code (物理键位) 映射, 与操作系统键盘布局无关 (映射表在 app.js)
+ * 待发字节队列在 state.queue (随存档保存), 发送中的帧状态在 ch._ps2 (仅运行期) */
+const PS2_HALF = 30;   // CLK 半周期 µs (~16.7kHz)
 
-const MEM_SIZE = 256;   // 256 × 8bit, A0..A7
-
-function memDefault(identity) {
-  const m = new Array(MEM_SIZE).fill(0);
-  if (identity) for (let i = 0; i < MEM_SIZE; i++) m[i] = i & 0xFF;   // ROM 出厂: 内容=地址
-  return m;
+/** 一字节的 11 个帧位: 0 + d0..d7 + 奇校验 + 1 */
+function ps2FrameBits(byte) {
+  const bits = [0];
+  let ones = 0;
+  for (let i = 0; i < 8; i++) { const b = (byte >> i) & 1; bits.push(b); ones += b; }
+  bits.push(ones % 2 === 0 ? 1 : 0);   // 补 1 使 数据+校验 中 1 的个数为奇
+  bits.push(1);
+  return bits;
 }
-/** 地址位 A0..A7 (脚1..8); 悬空/未知位按 0 (弱上拉策略, 与 ~ 引脚一致) */
-function memAddr(e) {
-  let a = 0;
-  for (let i = 0; i < 8; i++) if (e.read(i + 1) === V1) a |= 1 << i;
+
+/** 发送状态机: 建 DATA(30µs) → CLK 低(30µs, 采样) → CLK 高(30µs) → 下一位 */
+function ps2Tick(ch, e) {
+  const t = ch._ps2;
+  if (!t || !t.active) return;
+  if (t.phase === 0) {                      // CLK 高电平期: 建立 DATA
+    if (!t.bits || t.bit >= t.bits.length) {
+      if (!ch.state.queue.length) {         // 队列空 → 回空闲
+        t.active = false;
+        e.drive(1, V1, 0); e.drive(2, V1, 0);
+        return;
+      }
+      t.byte = ch.state.queue.shift();
+      ch.state.lastByte = t.byte;
+      t.bits = ps2FrameBits(t.byte);
+      t.bit = 0;
+    }
+    e.drive(2, t.bits[t.bit], 0);
+    t.phase = 1;
+  } else if (t.phase === 1) {               // CLK 下降沿 (主机采样点)
+    e.drive(1, V0, 0);
+    t.phase = 2;
+  } else {                                  // CLK 上升沿
+    e.drive(1, V1, 0);
+    t.bit++;
+    t.phase = 0;
+  }
+  e.schedule(PS2_HALF, () => ps2Tick(ch, e));
+}
+
+def('PS2', 'PS/2键盘·点击后打字', '输入/输出', [
+  R(1, 'CLK', 'out'), R(2, 'DATA', 'out'),
+], {
+  custom: true, fixedRot: true, hideNums: true, size: { w: 168, h: 112 },
+  init(ch) {
+    const s = ch.state;
+    if (!Array.isArray(s.queue)) s.queue = [];
+    ch._ps2 = null;                          // 载入/上电: 丢弃发送中的帧
+    ch.pinByNum[1].driven = V1;              // 空闲: CLK/DATA 均为高
+    ch.pinByNum[2].driven = V1;
+  },
+  eval(ch, e) {
+    const t = ch._ps2;
+    if (t && t.active) return;               // 发送中: 状态机经 timer 自驱动
+    if (!ch.state.queue.length) return;
+    ch._ps2 = { active: true, phase: 0, bit: 0, bits: null, byte: 0 };
+    ps2Tick(ch, e);
+  },
+});
+
+/* ========================= 存储器 =========================
+ * 以真实器件型号建模, 新型号只需提供 mem 配置 + 引脚表:
+ *   mem = { kind:'rom'|'ram', size, mask, addr:[脚...低位在前], data:[脚...],
+ *           ce/cs/we/oe: { pin, low } , weWriteHigh }
+ *   - 地址/数据脚号按型号排布; 地址悬空/未知位按 0 (弱上拉策略)
+ *   - CE/CS/WE/OE 低有效用 low:true; 悬空/未知视为"未动作"
+ *   - RAM 写入时数据位含未知则跳过, 避免悬空总线破坏内容
+ *   - weWriteHigh: true=WE 高电平写 (如 74189), false=WE 低电平写 (如 6116)
+ * 注意: 引脚号为仿真简化排布 (电源脚省略), 与实物封装图未必一致 */
+
+function memDefault(m, identity) {
+  const a = new Array(m.size).fill(0);
+  if (identity) for (let i = 0; i < m.size; i++) a[i] = i & m.mask;   // ROM 出厂: 内容=地址
   return a;
 }
+function memOf(ch, m, identity) {
+  if (!ch.props.mem || ch.props.mem.length !== m.size) {
+    ch.props.mem = memDefault(m, identity && m.kind === 'rom');
+  }
+  return ch.props.mem;
+}
+function memAddrBits(e, addr) {
+  let a = 0;
+  for (let i = 0; i < addr.length; i++) if (e.read(addr[i]) === V1) a |= 1 << i;
+  return a;
+}
+function memActive(e, c) {   // 使能脚: low=true 低有效; 无该脚 = 恒使能
+  if (!c) return true;
+  return c.low ? e.read(c.pin) === V0 : e.read(c.pin) === V1;
+}
+function memEval(ch, e) {
+  const m = LIB[ch.type].mem;
+  const mem = memOf(ch, m, true);
+  const a = memAddrBits(e, m.addr);
+  const ce = memActive(e, m.ce) && memActive(e, m.cs) && memActive(e, m.oe);
+  if (m.kind === 'rom') {
+    for (let i = 0; i < m.data.length; i++)
+      e.drive(m.data[i], ce ? ((mem[a] >> i) & 1) : VZ, 3);
+    return;
+  }
+  // RAM
+  const weLevel = m.weWriteHigh ? V1 : V0;
+  const writing = e.read(m.we.pin) === weLevel;   // 极性由 weWriteHigh 决定; X → 视为读
+  if (ce && writing) {
+    let v = 0, ok = true;
+    for (let i = 0; i < m.data.length; i++) {
+      const b = e.read(m.data[i]);
+      if (b === VX) { ok = false; break; }   // 悬空总线: 不写入
+      if (b === V1) v |= 1 << i;
+    }
+    if (ok) mem[a] = v & m.mask;
+  }
+  const driving = ce && !writing && memActive(e, m.oe);
+  const v = mem[a] || 0;
+  for (let i = 0; i < m.data.length; i++)
+    e.drive(m.data[i], driving ? ((v >> i) & 1) : VZ, 3);
+}
+/** 存储器元件定义 (ROM/PROM: kind='rom'; RAM/SRAM: kind='ram') */
+function defMem(type, desc, mem, pins) {
+  def(type, desc, '存储器', pins, { mem, defaults: { mem: memDefault(mem, mem.kind === 'rom') }, eval: memEval });
+}
 
-def('ROM', 'ROM 256×8 (右键编辑/导入)', '存储器', [
+/* 74187 — 256×4 TTL ROM, A0..A7 + O1..O4, 常驱动 */
+defMem('74187', 'ROM 256×4', { kind: 'rom', size: 256, mask: 0x0F,
+  addr: [1, 2, 3, 4, 5, 6, 7, 8], data: [9, 10, 11, 12] }, [
   L(1, 'A0', 'in'), L(2, 'A1', 'in'), L(3, 'A2', 'in'), L(4, 'A3', 'in'),
   L(5, 'A4', 'in'), L(6, 'A5', 'in'), L(7, 'A6', 'in'), L(8, 'A7', 'in'),
-  R(9, 'D0', 'out'), R(10, 'D1', 'out'), R(11, 'D2', 'out'), R(12, 'D3', 'out'),
-  R(13, 'D4', 'out'), R(14, 'D5', 'out'), R(15, 'D6', 'out'), R(16, 'D7', 'out'),
-], {
-  defaults: { mem: memDefault(true) },
-  eval(ch, e) {
-    const a = memAddr(e);
-    const m = ch.props.mem || (ch.props.mem = memDefault(true));
-    const v = m[a] || 0;
-    for (let i = 0; i < 8; i++) e.drive(9 + i, (v >> i) & 1, 3);
-  },
-});
+  R(9, 'O1', 'out'), R(10, 'O2', 'out'), R(11, 'O3', 'out'), R(12, 'O4', 'out'),
+]);
 
-def('RAM', 'RAM 256×8 (CS/WE 高有效)', '存储器', [
+/* 74S472 — 512×8 PROM, A0..A8 + /CE + D0..D7, /CE 低有效使能输出 */
+defMem('74S472', 'PROM 512×8', { kind: 'rom', size: 512, mask: 0xFF,
+  addr: [1, 2, 3, 4, 5, 6, 7, 8, 9], data: [11, 12, 13, 14, 15, 16, 17, 18],
+  ce: { pin: 10, low: true } }, [
   L(1, 'A0', 'in'), L(2, 'A1', 'in'), L(3, 'A2', 'in'), L(4, 'A3', 'in'),
   L(5, 'A4', 'in'), L(6, 'A5', 'in'), L(7, 'A6', 'in'), L(8, 'A7', 'in'),
-  L(9, 'WE', 'in'), L(10, 'CS', 'in'),
-  R(11, 'D0', 'io'), R(12, 'D1', 'io'), R(13, 'D2', 'io'), R(14, 'D3', 'io'),
-  R(15, 'D4', 'io'), R(16, 'D5', 'io'), R(17, 'D6', 'io'), R(18, 'D7', 'io'),
-], {
-  defaults: { mem: memDefault(false) },
-  eval(ch, e) {
-    const m = ch.props.mem || (ch.props.mem = memDefault(false));
-    const cs = e.read(10) === V1;   // 片选, 高有效; 悬空/未知 = 未选中
-    const we = e.read(9) === V1;    // 写使能, 高有效
-    const a = memAddr(e);
-    if (!cs) {
-      for (let i = 0; i < 8; i++) e.drive(11 + i, VZ, 3);   // 未选中: 数据线高阻
-      return;
-    }
-    if (we) {
-      // 写: 数据位含未知 (悬空总线) 时不写入, 避免破坏内容
-      let v = 0, ok = true;
-      for (let i = 0; i < 8; i++) {
-        const b = e.read(11 + i);
-        if (b === VX) { ok = false; break; }
-        if (b === V1) v |= 1 << i;
-      }
-      if (ok) m[a] = v;
-      for (let i = 0; i < 8; i++) e.drive(11 + i, VZ, 3);   // 写周期数据线保持高阻
-    } else {
-      const v = m[a] || 0;
-      for (let i = 0; i < 8; i++) e.drive(11 + i, (v >> i) & 1, 3);
-    }
-  },
-});
+  L(9, 'A8', 'in'), L(10, '/CE', 'in'),
+  R(11, 'D0', 'out'), R(12, 'D1', 'out'), R(13, 'D2', 'out'), R(14, 'D3', 'out'),
+  R(15, 'D4', 'out'), R(16, 'D5', 'out'), R(17, 'D6', 'out'), R(18, 'D7', 'out'),
+]);
+
+/* 74189 — 16×4 RAM, /CS /WE 低有效; /WE=1 写, /WE=0 读, 三态输出 */
+defMem('74189', 'RAM 16×4', { kind: 'ram', size: 16, mask: 0x0F,
+  addr: [1, 2, 3, 4], data: [7, 8, 9, 10],
+  cs: { pin: 5, low: true }, we: { pin: 6, low: true }, weWriteHigh: true }, [
+  L(1, 'A0', 'in'), L(2, 'A1', 'in'), L(3, 'A2', 'in'), L(4, 'A3', 'in'),
+  L(5, '/CS', 'in'), L(6, '/WE', 'in'),
+  R(7, 'D1', 'io'), R(8, 'D2', 'io'), R(9, 'D3', 'io'), R(10, 'D4', 'io'),
+]);
+
+/* 6116 — SRAM 2K×8, /CS /WE /OE 低有效; /WE=0 写, /WE=1 且 /OE=0 读 */
+defMem('6116', 'SRAM 2K×8', { kind: 'ram', size: 2048, mask: 0xFF,
+  addr: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], data: [13, 14, 15, 16, 17, 18, 19, 20],
+  cs: { pin: 21, low: true }, oe: { pin: 22, low: true }, we: { pin: 12, low: true }, weWriteHigh: false }, [
+  L(1, 'A0', 'in'), L(2, 'A1', 'in'), L(3, 'A2', 'in'), L(4, 'A3', 'in'),
+  L(5, 'A4', 'in'), L(6, 'A5', 'in'), L(7, 'A6', 'in'), L(8, 'A7', 'in'),
+  L(9, 'A8', 'in'), L(10, 'A9', 'in'), L(11, 'A10', 'in'), L(12, '/WE', 'in'),
+  R(13, 'D0', 'io'), R(14, 'D1', 'io'), R(15, 'D2', 'io'), R(16, 'D3', 'io'),
+  R(17, 'D4', 'io'), R(18, 'D5', 'io'), R(19, 'D6', 'io'), R(20, 'D7', 'io'),
+  L(21, '/CS', 'in'), L(22, '/OE', 'in'),
+]);
 
 const CHIPS = { LIB };
 global.CHIPS = CHIPS;
