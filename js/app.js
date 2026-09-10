@@ -1049,16 +1049,21 @@ canvas.addEventListener('wheel', e => {
     // 捏合缩放 (触控板双指捏合 = ctrl+滚轮) / 鼠标滚轮: 以光标为中心缩放
     const wx = (sx - r.width / 2) / app.cam.zoom + app.cam.x;
     const wy = (sy - r.height / 2) / app.cam.zoom + app.cam.y;
-    const dy = line ? e.deltaY * 16 : e.deltaY;
-    const f = Math.exp(-dy * 0.0022);          // 连续缩放, 与系统捏合手感一致
-    app.cam.zoom = Math.min(zmax, Math.max(zmin, app.cam.zoom * f));
+    if (e.ctrlKey) {
+      // 触控板捏合: 连续小步进; 缩小再加强一档 (系统送出的缩小步进偏小)
+      const k = e.deltaY > 0 ? 0.009 : 0.005;
+      app.cam.zoom = Math.min(zmax, Math.max(zmin, app.cam.zoom * Math.exp(-e.deltaY * k)));
+    } else {
+      const dy = line ? e.deltaY * 16 : e.deltaY;
+      app.cam.zoom = Math.min(zmax, Math.max(zmin, app.cam.zoom * Math.exp(-dy * 0.0022)));
+    }
     // 保持鼠标下的点不动
     app.cam.x = wx - (sx - r.width / 2) / app.cam.zoom;
     app.cam.y = wy - (sy - r.height / 2) / app.cam.zoom;
   } else {
-    // 触控板双指滑动: 平移视图, 内容跟手 (与 macOS 一致)
-    app.cam.x -= e.deltaX;
-    app.cam.y -= e.deltaY;
+    // 触控板双指滑动: 平移视图, 内容跟手 (与 macOS 自然滚动一致)
+    app.cam.x += e.deltaX;
+    app.cam.y += e.deltaY;
   }
   scheduleSave();   // 相机变化随自动保存持久化 (700ms 防抖)
 }, { passive: false });
