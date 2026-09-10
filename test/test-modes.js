@@ -17,6 +17,9 @@ function check(name, cond, extra) {
   else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? '  →  ' + JSON.stringify(extra) : '')); }
 }
 
+/** 按名称找示例 (不依赖索引顺序) */
+const exByName = s => EXAMPLES.find(e => e.name.includes(s));
+
 /** 把网表转成引脚划分 (网络集合), 用于等价性比较 */
 function partition(wires) {
   const parent = new Map();
@@ -90,13 +93,13 @@ console.log('\n[3] 自动摆放+接线: 面包板网表与原理图网表等价 
       }
     } catch (err) { allOK = false; bad.push(ex.name + ':' + err.message); }
   }
-  check('8 个示例网表等价', allOK, bad);
+  check(`全部 ${EXAMPLES.length} 个示例网表等价`, allOK, bad);
 }
 
 console.log('\n[4] 面包板模式仿真 (半加器真值表)');
 {
   const sim = new Engine(LIB);
-  const b = EXAMPLES[2].build(); // 半加器
+  const b = exByName('半加器').build();
   sim.load({ chips: b.chips, wires: b.wires });
   BB.autoPlace(sim);
   const r = BB.autoWire(sim, sim.wiresRaw());
@@ -134,7 +137,7 @@ console.log('\n[5] PCB: 焊盘位置 / 自动布局 / 飞线');
   check('旋转90°生效', p1r.x > 50 && p1r.y < 40, p1r);
 
   // 布局与飞线
-  const b = EXAMPLES[0].build(); // SR锁存器
+  const b = exByName('SR 锁存器').build();
   sim.load({ chips: b.chips, wires: b.wires });
   PCB.autoPlace(sim);
   let inBounds = true;
@@ -151,7 +154,7 @@ console.log('\n[5] PCB: 焊盘位置 / 自动布局 / 飞线');
 console.log('\n[6] 立创EDA 导出格式');
 {
   const sim = new Engine(LIB);
-  const b = EXAMPLES[5].build(); // 数码管计数 (含VCC)
+  const b = exByName('数码管计数').build(); // 含VCC
   sim.load({ chips: b.chips, wires: b.wires });
   PCB.autoPlace(sim);
   const r = EasyEDA.buildEasyEDA(sim, PCB);
@@ -178,7 +181,7 @@ console.log('\n[6] 立创EDA 导出格式');
 console.log('\n[7] 模式切换往返: 原理图 → 面包板 → 原理图');
 {
   const sim = new Engine(LIB);
-  const b = EXAMPLES[0].build();
+  const b = exByName('SR 锁存器').build();
   sim.load({ chips: b.chips, wires: b.wires });
   const before = sim.wiresRaw();
   const beforePart = partition(before);
@@ -258,7 +261,7 @@ console.log('\n[9] 多块面包板 (纵向排列)');
   check('板1 元件矩形带纵向偏移', Math.abs(rB1.y - (BB.BOARD_H + BB.BOARD_GAP + BB.CHANNEL_Y - 25)) < 1e-9, rB1.y);
 
   // 两块板下的网表等价性
-  const b = EXAMPLES[0].build();
+  const b = exByName('SR 锁存器').build();
   sim.load({ chips: b.chips, wires: b.wires });
   BB.setCols(60);
   BB.autoPlace(sim);
@@ -438,7 +441,7 @@ console.log('\n[11] 供电: 电源脚孔位 / 自动供电跳线 / 供电判定'
   check('NE555 供电跳线 → 上电', BB.chipPowered(info5, n5) === true);
 
   // 网表等价性不受供电跳线影响 (电源网络无引脚, 不派生导线)
-  const b = EXAMPLES[2].build();
+  const b = exByName('半加器').build();
   const sim2 = new Engine(LIB);
   sim2.load({ chips: b.chips, wires: b.wires });
   const before = partition(sim2.wiresRaw());
@@ -541,6 +544,33 @@ console.log('\n[10] LCD12864 图形液晶 (ST7920: 文字层 + 图形层)');
   const saved = JSON.parse(JSON.stringify(lcd.state));
   check('12864 文字随存档保存', saved.ddram[2] === 'X');
   check('12864 图形随存档保存', saved.gdram[5 * 16 + 2] === 0xFF);
+}
+
+console.log('\n[11] PS/2 测试脚本');
+{
+  // 脚本解析
+  const acts = ps2ParseScript('type hi\nsleep 500\ntype 2\nkey Enter\n# 注释\n\n');
+  check('脚本解析: 4 条动作', acts.length === 4, acts);
+  check('脚本解析: sleep 换算微秒', acts[1].type === 'sleep' && acts[1].us === 500000);
+  check('脚本解析: key Enter 含按下与断开码', acts[3].type === 'bytes' &&
+    acts[3].bytes.join(',') === '90,240,90');
+  // 字符 → 扫描码
+  check('字符码: a = 0x1C', ps2CharCodes('a')[0] === 0x1C);
+  check('字符码: A 自动夹 Shift (12,1C,F0,1C,F0,12)', ps2CharCodes('A').join(',') === '18,28,240,28,240,18');
+  check('字符码: 换行 = Enter (0x5A)', ps2CharCodes('\n')[0] === 0x5A);
+  check('字符码: ! = Shift+1 (含 Break)', ps2CharCodes('!').join(',') === '18,22,240,22,240,18');
+
+  // 运行: 通过真实 PS/2 协议把 "hi!" 打进电路 (由 CLK/DATA 接收方验证较重,
+  // 这里验证队列投喂与排空、运行状态收敛)
+  const sim = new Engine(LIB);
+  const ps2 = sim.addChip('PS2', 0, 0);
+  ps2.state.script = 'type hi!\nsleep 2\ntype x';
+  ps2.state.running = true;
+  ps2.state.run = { acts: ps2ParseScript(ps2.state.script), i: 0, ci: 0 };
+  sim.evalChip(ps2);
+  sim.advance(60000);              // 推进 60ms: 发送帧 + 2ms 等待全部完成
+  check('脚本运行完成状态收敛', ps2.state.running === false && ps2.state.queue.length === 0);
+  check('最后一个发送字节为 x 的 Break 码 (0x22)', ps2.state.lastByte === 0x22, ps2.state.lastByte);
 }
 
 console.log(`结果: ${pass} 通过, ${fail} 失败`);

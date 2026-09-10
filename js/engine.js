@@ -475,6 +475,8 @@ class Engine {
       this.fireClock(c);
     }
     this.processQueue(target, this.FRAME_CAP);
+    // 无事件 (纯定时器等待) 时时间也必须推进, 否则相对定时器永不成熟
+    if (!this.overload && this.simTime < target) this.simTime = target;
   }
 
   /** 步进: 翻转所有无稳态源半周期并结算, 返回触发的数量 */

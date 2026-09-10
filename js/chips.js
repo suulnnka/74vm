@@ -548,6 +548,151 @@ def('GND', '地 GND·恒0', '输入/输出', [R(1, 'GND', 'out')], {
  * 待发字节队列在 state.queue (随存档保存), 发送中的帧状态在 ch._ps2 (仅运行期) */
 const PS2_HALF = 30;   // CLK 半周期 µs (~16.7kHz)
 
+/* Set 2 扫描码表 (按物理键位 e.code) 与扩展键前缀表 */
+const PS2_CODE = {
+  KeyA: 0x1C, KeyB: 0x32, KeyC: 0x21, KeyD: 0x23, KeyE: 0x24, KeyF: 0x2B,
+  KeyG: 0x34, KeyH: 0x33, KeyI: 0x43, KeyJ: 0x3B, KeyK: 0x42, KeyL: 0x4B,
+  KeyM: 0x3A, KeyN: 0x31, KeyO: 0x44, KeyP: 0x4D, KeyQ: 0x15, KeyR: 0x2D,
+  KeyS: 0x1B, KeyT: 0x2C, KeyU: 0x3C, KeyV: 0x2A, KeyW: 0x1D, KeyX: 0x22,
+  KeyY: 0x35, KeyZ: 0x1A,
+  Digit1: 0x16, Digit2: 0x1E, Digit3: 0x26, Digit4: 0x25, Digit5: 0x2E,
+  Digit6: 0x36, Digit7: 0x3D, Digit8: 0x3E, Digit9: 0x46, Digit0: 0x45,
+  Enter: 0x5A, Space: 0x29, Backspace: 0x66, Escape: 0x76, Tab: 0x0D,
+  CapsLock: 0x58,
+  F1: 0x05, F2: 0x06, F3: 0x04, F4: 0x0C, F5: 0x03, F6: 0x0B,
+  F7: 0x83, F8: 0x0A, F9: 0x01, F10: 0x09, F11: 0x78, F12: 0x07,
+  Minus: 0x55, Equal: 0x4E, BracketLeft: 0x54, BracketRight: 0x5B,
+  Backslash: 0x5D, Semicolon: 0x4C, Quote: 0x52, Backquote: 0x0E,
+  Comma: 0x41, Period: 0x49, Slash: 0x4A,
+  ShiftLeft: 0x12, ShiftRight: 0x59, ControlLeft: 0x14, AltLeft: 0x11,
+  Numpad0: 0x70, Numpad1: 0x69, Numpad2: 0x72, Numpad3: 0x7A,
+  Numpad4: 0x6B, Numpad5: 0x73, Numpad6: 0x74, Numpad7: 0x6C,
+  Numpad8: 0x75, Numpad9: 0x7D, NumpadMultiply: 0x7C, NumpadSubtract: 0x7B,
+  NumpadAdd: 0x79, NumpadDecimal: 0x71,
+};
+const PS2_EXT = {
+  ArrowUp: 0x75, ArrowDown: 0x72, ArrowLeft: 0x6B, ArrowRight: 0x74,
+  ControlRight: 0x14, AltRight: 0x11, NumpadEnter: 0x5A, NumpadDivide: 0x4A,
+  Home: 0x6C, End: 0x69, PageUp: 0x7D, PageDown: 0x7A,
+  Insert: 0x70, Delete: 0x71, MetaLeft: 0x5B, MetaRight: 0x5C, ContextMenu: 0x5D,
+};
+
+/* 字符 → 扫描码序列 (美式布局; 大写/上位符号自动夹 Shift) */
+const PS2_CHAR = (() => {
+  const m = { ' ': [0x29, 0xF0, 0x29], '\n': [0x5A, 0xF0, 0x5A], '\t': [0x0D, 0xF0, 0x0D] };
+  for (const ec in PS2_CODE) {
+    if (/^Key[A-Z]$/.test(ec)) {
+      const L = ec.slice(3);
+      const k = PS2_CODE[ec];
+      m[L.toLowerCase()] = [k, 0xF0, k];
+      m[L] = [0x12, k, 0xF0, k, 0xF0, 0x12];
+    } else if (/^Digit[0-9]$/.test(ec)) {
+      m[ec[5]] = [PS2_CODE[ec], 0xF0, PS2_CODE[ec]];
+    }
+  }
+  const shifted = { '!': 'Digit1', '@': 'Digit2', '#': 'Digit3', '$': 'Digit4',
+    '%': 'Digit5', '^': 'Digit6', '&': 'Digit7', '*': 'Digit8', '(': 'Digit9',
+    ')': 'Digit0', '~': 'Backquote', '_': 'Minus', '+': 'Equal',
+    '{': 'BracketLeft', '}': 'BracketRight', '|': 'Backslash', ':': 'Semicolon',
+    '"': 'Quote', '<': 'Comma', '>': 'Period', '?': 'Slash' };
+  for (const c in shifted) { const k = PS2_CODE[shifted[c]]; m[c] = [0x12, k, 0xF0, k, 0xF0, 0x12]; }
+  const plain = { '-': 'Minus', '=': 'Equal', '[': 'BracketLeft', ']': 'BracketRight',
+    '\\': 'Backslash', ';': 'Semicolon', "'": 'Quote', ',': 'Comma',
+    '.': 'Period', '/': 'Slash', '`': 'Backquote' };
+  for (const c in plain) m[c] = [PS2_CODE[plain[c]], 0xF0, PS2_CODE[plain[c]]];
+  return m;
+})();
+function ps2CharCodes(c) {
+  if (PS2_CHAR[c]) return PS2_CHAR[c];
+  if (c == null) return null;   // 调试: 越界访问时打印现场
+  console.error('DBG ps2CharCodes got:', JSON.stringify(c));
+  const up = c.toUpperCase();
+  const code = PS2_CODE['Key' + up];
+  return code != null ? [0x12, code, 0xF0, code, 0xF0, 0x12] : null;   // 其他大写字母兜底
+}
+
+/* 测试脚本: 每行一条 type 文本 / sleep 毫秒 / key 键名; # 与空行忽略 */
+function ps2ParseScript(text) {
+  const acts = [];
+  for (const raw of String(text).split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+    const sl = line.match(/^sleep\s+(\d+)(ms|s)?$/i);
+    if (sl) { acts.push({ type: 'sleep', us: +sl[1] * (sl[2] && sl[2].toLowerCase() === 's' ? 1000000 : 1000) }); continue; }
+    const ky = line.match(/^key\s+([A-Za-z0-9]+)$/);
+    if (ky) {
+      let name = ky[1];
+      name = name.charAt(0).toUpperCase() + name.slice(1);
+      const code = PS2_CODE[name] != null ? PS2_CODE[name] : PS2_EXT[name];
+      if (code != null) {
+        const bytes = PS2_EXT[name] != null
+          ? [0xE0, code, 0xE0, 0xF0, code]
+          : [code, 0xF0, code];
+        acts.push({ type: 'bytes', bytes });
+      }
+      continue;
+    }
+    const tp = line.match(/^type\s+([\s\S]*)$/);
+    acts.push({ type: 'type', text: tp ? tp[1] : line });
+  }
+  return acts;
+}
+
+/** 脚本运行器: 引擎定时器驱动; 等发送排空 → 逐动作投喂字节 */
+function ps2ScriptTick(ch, e) {
+  if (!ch.state.running) { DBG('die: not running'); ch._sTick = false; return; }
+  const run = ch.state.run;
+  if (!run) { DBG('die: no run'); ch._sTick = false; return; }
+  if ((ch._ps2 && ch._ps2.active) || ch.state.queue.length >= 56) {
+    e.schedule(200, () => ps2ScriptTick(ch, e));            // 等帧/队列排空
+    return;
+  }
+  if (run.i >= run.acts.length) {                            // 脚本完成
+    ch.state.running = false;
+    ch._sTick = false;
+    delete ch.state.run;
+    if (typeof window !== 'undefined')
+      window.dispatchEvent(new CustomEvent('ps2scriptdone', { detail: { id: ch.id } }));
+    return;
+  }
+  const a = run.acts[run.i];
+  if (a.type === 'sleep') {
+    run.i++;
+    e.schedule(a.us, () => ps2ScriptTick(ch, e));
+    return;
+  }
+  if (a.type === 'bytes') {
+    ch.state.queue.push(...a.bytes);
+    run.i++;
+    ps2KickSend(ch, e);
+    e.schedule(2000, () => ps2ScriptTick(ch, e));
+    return;
+  }
+  if (run.ci >= a.text.length) {                             // 本行打完
+    run.i++; run.ci = 0;
+    e.schedule(500, () => ps2ScriptTick(ch, e));
+    return;
+  }
+  if (run.ci >= a.text.length) { console.error('DBG ci overshoot in same tick', run.ci, a.text.length, a.text); }
+  const codes = ps2CharCodes(a.text[run.ci]);
+  run.ci++;
+  if (codes) {
+    if (ch.state.queue.length + codes.length > 64) {         // 队列将满: 等待
+      e.schedule(200, () => ps2ScriptTick(ch, e));
+      return;
+    }
+    ch.state.queue.push(...codes);
+    ps2KickSend(ch, e);
+  }
+  e.schedule(4000, () => ps2ScriptTick(ch, e));              // 字符间 4ms
+}
+function ps2KickSend(ch, e) {
+  if (!ch._ps2 || !ch._ps2.active) {         // 空闲: 重新启动发送状态机
+    ch._ps2 = { active: true, phase: 0, bit: 0, bits: null, byte: 0 };
+    ps2Tick(ch, e);
+  }
+}
+
 /** 一字节的 11 个帧位: 0 + d0..d7 + 奇校验 + 1 */
 function ps2FrameBits(byte) {
   const bits = [0];
@@ -594,18 +739,28 @@ def('PS2', 'PS/2键盘·点击后打字', '输入/输出', [
   init(ch) {
     const s = ch.state;
     if (!Array.isArray(s.queue)) s.queue = [];
+    s.running = false; delete s.run;         // 载入/上电: 脚本从头开始
     ch._ps2 = null;                          // 载入/上电: 丢弃发送中的帧
     ch.pinByNum[1].driven = V1;              // 空闲: CLK/DATA 均为高
     ch.pinByNum[2].driven = V1;
   },
   eval(ch, e) {
     const t = ch._ps2;
+    if (ch.state.running && !ch._sTick) {    // 脚本运行器: 引擎定时器驱动
+      ch._sTick = true;
+      e.schedule(100, () => ps2ScriptTick(ch, e));   // _sTick 由链存活期持有
+    }
     if (t && t.active) return;               // 发送中: 状态机经 timer 自驱动
     if (!ch.state.queue.length) return;
     ch._ps2 = { active: true, phase: 0, bit: 0, bits: null, byte: 0 };
     ps2Tick(ch, e);
   },
 });
+
+global.PS2_CODE = PS2_CODE;
+global.PS2_EXT = PS2_EXT;
+global.ps2ParseScript = ps2ParseScript;
+global.ps2CharCodes = ps2CharCodes;
 
 /* ---------------- 4×4 矩阵键盘 ----------------
  * 16 个按键按 4×4 排列, 8 个引脚 = 4 列 (C1..C4, 输入, 接主机扫描驱动)

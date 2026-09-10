@@ -15,6 +15,10 @@ const ctxMenu = document.getElementById('ctxmenu');
 
 const sim = new Engine(LIB);
 
+/* 多语言: t(中文) 返回当前语言文本, tf(模式, params) 替换 {x} 占位符 */
+const t = window.I18N.t;
+const tf = window.I18N.tf;
+
 const PIN_GAP = 28, DEFAULT_W = 112;   // 网格 = 28px; 尺寸均为偶数格(56px倍)→边框压线
 const DPR = Math.min(2, window.devicePixelRatio || 1);
 
@@ -442,7 +446,7 @@ function drawIO(ch, def, z) {
       ctx.fillText(on ? '1' : '0', 0, -half.y + 10);
       ctx.fillStyle = '#6b7a8c';
       ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
-      ctx.fillText('开关', 0, half.y - 9);
+      ctx.fillText(t('开关'), 0, half.y - 9);
       break;
     }
     case 'BTN': {
@@ -463,7 +467,7 @@ function drawIO(ch, def, z) {
       ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
       ctx.fillStyle = '#6b7a8c';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('按住', 0, half.y - 9);
+      ctx.fillText(t('按住'), 0, half.y - 9);
       break;
     }
     case 'CLOCK': {
@@ -514,7 +518,7 @@ function drawIO(ch, def, z) {
       ctx.fillText(v === 'Z' ? 'Z' : String(v), 0, -2);
       ctx.fillStyle = '#6b7a8c';
       ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
-      ctx.fillText('探针', 0, half.y - 9);
+      ctx.fillText(t('探针'), 0, half.y - 9);
       break;
     }
     case 'SEG7': {
@@ -599,7 +603,7 @@ function drawIO(ch, def, z) {
       ctx.fillText((t && t.active ? 'TX ' : 'IDLE ') + lastTxt + (nq ? ' +' + nq : ''), 0, gy + gh + 11);
       ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
       ctx.fillStyle = focused ? COL.sel : '#6b7a8c';
-      ctx.fillText(focused ? '输入中… Esc 退出' : '点击后打字', 0, half.y - 7);
+      ctx.fillText(ch.state.running ? I18N.t('▶ 脚本运行中') : (focused ? I18N.t('输入中… Esc 退出') : I18N.t('点击后打字')), 0, half.y - 7);
       break;
     }
     case 'KB44': {
@@ -612,7 +616,7 @@ function drawIO(ch, def, z) {
       ctx.font = '9px Consolas, monospace';
       ctx.fillStyle = pull ? '#0277bd' : '#6b7a8c';
       ctx.textAlign = 'right';
-      ctx.fillText(pull ? '上拉' : '下拉', half.x - 10, -half.y + 13);
+      ctx.fillText(t(pull ? '上拉' : '下拉'), half.x - 10, -half.y + 13);
       // 4×4 键格 (按住的键高亮)
       for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
         const q = kb44CellRect(r, c);
@@ -635,7 +639,7 @@ function drawIO(ch, def, z) {
       // 底部提示
       ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
       ctx.fillStyle = '#6b7a8c'; ctx.textAlign = 'center';
-      ctx.fillText('按住按键接通行列', 0, half.y - 10);
+      ctx.fillText(t('按住按键接通行列'), 0, half.y - 10);
       break;
     }
     case 'LCD1602': {
@@ -907,13 +911,13 @@ function pushUndo() {
   scheduleSave();
 }
 function undo() {
-  if (!app.undoStack.length) { toast('没有可撤销的操作'); return; }
+  if (!app.undoStack.length) { toast(t('没有可撤销的操作')); return; }
   app.redoStack.push(JSON.stringify(buildSave(false)));
   restoreSave(JSON.parse(app.undoStack.pop()));
   scheduleSave();
 }
 function redo() {
-  if (!app.redoStack.length) { toast('没有可重做的操作'); return; }
+  if (!app.redoStack.length) { toast(t('没有可重做的操作')); return; }
   app.undoStack.push(JSON.stringify(buildSave(false)));
   restoreSave(JSON.parse(app.redoStack.pop()));
   scheduleSave();
@@ -1026,8 +1030,8 @@ function scheduleSave() {
 function doSave(silent) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(buildSave()));
-    if (!silent) toast('已保存到浏览器');
-  } catch (e) { if (!silent) toast('保存失败: ' + e.message, 'err'); }
+    if (!silent) toast(t('已保存到浏览器'));
+  } catch (e) { if (!silent) toast(tf('保存失败: {m}', { m: e.message }), 'err'); }
 }
 
 /* ================= 指针交互 ================= */
@@ -1170,8 +1174,13 @@ function updateHover(w) {
   if (pinHit) {
     app.hover = { kind: 'pin', ch: pinHit.ch, pin: pinHit.pin };
     const def = LIB[pinHit.ch.type];
-    const dirTxt = pinHit.pin.dir === 'in' ? '输入' : pinHit.pin.dir === 'out' ? '输出' : '双向';
-    tooltipEl.textContent = `${def.type} · 引脚${def.hideNums ? '' : ' ' + pinHit.pin.num} ${pinHit.pin.name} (${dirTxt})`;
+    const dirTxt = t(pinHit.pin.dir === 'in' ? '输入' : pinHit.pin.dir === 'out' ? '输出' : '双向');
+    tooltipEl.textContent = tf('{type} · 引脚{num} {name} ({dir})', {
+      type: def.type,
+      num: def.hideNums ? '' : ' ' + pinHit.pin.num,
+      name: pinHit.pin.name,
+      dir: dirTxt,
+    });
     tooltipEl.style.display = 'block';
     const r = holder.getBoundingClientRect();
     tooltipEl.style.left = (pinHit.ch ? 0 : 0) + 'px'; // 占位, 下方设置
@@ -1261,10 +1270,10 @@ function completeWire(hit) {
   const a = app.wiring;
   app.wiring = null;
   if (!a) return;
-  if (sim.wireExists(a.ch, a.pin.num, hit.ch, hit.pin.num)) { toast('这两点已连接'); return; }
+  if (sim.wireExists(a.ch, a.pin.num, hit.ch, hit.pin.num)) { toast(t('这两点已连接')); return; }
   pushUndo();
   const nw = sim.addWire(a.ch, a.pin.num, hit.ch, hit.pin.num);
-  if (nw) toast('已连接 ' + LIB[a.ch.type].type + '.' + a.pin.name + ' ↔ ' + LIB[hit.ch.type].type + '.' + hit.pin.name);
+  if (nw) toast(tf('已连接 {a} ↔ {b}', { a: LIB[a.ch.type].type + '.' + a.pin.name, b: LIB[hit.ch.type].type + '.' + hit.pin.name }));
 }
 
 const ZOOM_LIM = { schematic: [0.15, 8], breadboard: [0.15, 8], pcb: [0.5, 20] };
@@ -1335,27 +1344,28 @@ canvas.addEventListener('contextmenu', e => {
   const ch = pinHit ? pinHit.ch : chipAt(w);
   if (ch) {
     const items = [];
-    items.push({ text: '旋转 90° (R)', fn: () => rotateChip(ch) });
-    if (ch.type === 'CLOCK') items.push({ text: '编辑频率…', fn: () => editLabelOrFreq(ch) });
-    items.push({ text: '编辑标签…', fn: () => editLabel(ch) });
-    if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? '退出打字 (Esc)' : '聚焦打字…', fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
-    if (ch.type === 'KB44') items.push({ text: '行脚空闲电平: ' + (Number(ch.props.pull) ? '上拉 1' : '下拉 0') + ' (点击切换)', fn: () => { ch.props.pull = Number(ch.props.pull) ? 0 : 1; sim.evalChip(ch); sim.flush(); sim.touch(); scheduleSave(); } });
+    items.push({ text: t('旋转 90° (R)'), fn: () => rotateChip(ch) });
+    if (ch.type === 'CLOCK') items.push({ text: t('编辑频率…'), fn: () => editLabelOrFreq(ch) });
+    items.push({ text: t('编辑标签…'), fn: () => editLabel(ch) });
+    if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? t('退出打字 (Esc)') : t('聚焦打字…'), fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
+    items.push(...ps2ScriptItems(ch));
+    if (ch.type === 'KB44') items.push({ text: tf('行脚空闲电平: {v} (点击切换)', { v: t(Number(ch.props.pull) ? '上拉 1' : '下拉 0') }), fn: () => { ch.props.pull = Number(ch.props.pull) ? 0 : 1; sim.evalChip(ch); sim.flush(); sim.touch(); scheduleSave(); } });
     items.push(...memoryMenuItems(ch));
-    items.push({ text: '复制 (Ctrl+D)', fn: () => duplicateSelection() });
-    items.push({ text: '删除 (Del)', fn: () => deleteChip(ch) });
+    items.push({ text: t('复制 (Ctrl+D)'), fn: () => duplicateSelection() });
+    items.push({ text: t('删除 (Del)'), fn: () => deleteChip(ch) });
     showCtxMenu(e.clientX, e.clientY, items);
     selectOnly('chip', ch.id);
     return;
   }
   const wI = wireAt(w);
   if (wI) {
-    showCtxMenu(e.clientX, e.clientY, [{ text: '删除导线', fn: () => deleteWire(wI) }]);
+    showCtxMenu(e.clientX, e.clientY, [{ text: t('删除导线'), fn: () => deleteWire(wI) }]);
     selectOnly('wire', wI.id);
     return;
   }
   showCtxMenu(e.clientX, e.clientY, [
-    { text: '⤢ 适配视图', fn: fitView },
-    { text: '❓ 帮助', fn: () => showModal(true) },
+    { text: t('⤢ 适配视图'), fn: fitView },
+    { text: t('❓ 帮助'), fn: () => showModal(true) },
   ]);
 });
 
@@ -1371,10 +1381,10 @@ function rotateChip(ch) {
 }
 function editLabel(ch) {
   Dialog.prompt({
-    title: '编辑标签 — ' + ch.type,
-    label: '元件标签 (留空清除):',
+    title: tf('编辑标签 — {t}', { t: ch.type }),
+    label: t('元件标签 (留空清除):'),
     value: ch.props.label || '',
-    placeholder: '例如 CLK / ~RESET',
+    placeholder: t('例如 CLK / ~RESET'),
   }).then(s => {
     if (s == null) return;
     ch.props.label = s.trim();
@@ -1441,34 +1451,7 @@ function duplicateSelection() {
 
 /* ---------- PS/2 键盘打字聚焦 (Set 2 扫描码, 按物理键位 e.code 映射) ---------- */
 
-const PS2_CODE = {
-  KeyA: 0x1C, KeyB: 0x32, KeyC: 0x21, KeyD: 0x23, KeyE: 0x24, KeyF: 0x2B,
-  KeyG: 0x34, KeyH: 0x33, KeyI: 0x43, KeyJ: 0x3B, KeyK: 0x42, KeyL: 0x4B,
-  KeyM: 0x3A, KeyN: 0x31, KeyO: 0x44, KeyP: 0x4D, KeyQ: 0x15, KeyR: 0x2D,
-  KeyS: 0x1B, KeyT: 0x2C, KeyU: 0x3C, KeyV: 0x2A, KeyW: 0x1D, KeyX: 0x22,
-  KeyY: 0x35, KeyZ: 0x1A,
-  Digit1: 0x16, Digit2: 0x1E, Digit3: 0x26, Digit4: 0x25, Digit5: 0x2E,
-  Digit6: 0x36, Digit7: 0x3D, Digit8: 0x3E, Digit9: 0x46, Digit0: 0x45,
-  Enter: 0x5A, Space: 0x29, Backspace: 0x66, Escape: 0x76, Tab: 0x0D,
-  CapsLock: 0x58,
-  F1: 0x05, F2: 0x06, F3: 0x04, F4: 0x0C, F5: 0x03, F6: 0x0B,
-  F7: 0x83, F8: 0x0A, F9: 0x01, F10: 0x09, F11: 0x78, F12: 0x07,
-  Minus: 0x55, Equal: 0x4E, BracketLeft: 0x54, BracketRight: 0x5B,
-  Backslash: 0x5D, Semicolon: 0x4C, Quote: 0x52, Backquote: 0x0E,
-  Comma: 0x41, Period: 0x49, Slash: 0x4A,
-  ShiftLeft: 0x12, ShiftRight: 0x59, ControlLeft: 0x14, AltLeft: 0x11,
-  Numpad0: 0x70, Numpad1: 0x69, Numpad2: 0x72, Numpad3: 0x7A,
-  Numpad4: 0x6B, Numpad5: 0x73, Numpad6: 0x74, Numpad7: 0x6C,
-  Numpad8: 0x75, Numpad9: 0x7D, NumpadMultiply: 0x7C, NumpadSubtract: 0x7B,
-  NumpadAdd: 0x79, NumpadDecimal: 0x71,
-};
-/** 扩展键: 发送 0xE0 前缀 + 扫描码 */
-const PS2_EXT = {
-  ArrowUp: 0x75, ArrowDown: 0x72, ArrowLeft: 0x6B, ArrowRight: 0x74,
-  ControlRight: 0x14, AltRight: 0x11, NumpadEnter: 0x5A, NumpadDivide: 0x4A,
-  Home: 0x6C, End: 0x69, PageUp: 0x7D, PageDown: 0x7A,
-  Insert: 0x70, Delete: 0x71, MetaLeft: 0x5B, MetaRight: 0x5C, ContextMenu: 0x5D,
-};
+/* Set 2 扫描码表 PS2_CODE / PS2_EXT 在 chips.js (协议层), 此处直接使用 */
 
 /** 入队待发字节并触发发送 (队列上限 64, 溢出丢最旧) */
 function ps2Queue(ch, bytes) {
@@ -1495,11 +1478,67 @@ function ps2Keyup(ch, e) {
   else ps2Queue(ch, [0xF0, code]);            // Break 码 = F0 + Make
 }
 
+/** PS/2 测试脚本: type 文本 / sleep 毫秒 / key 键名, 右键运行 */
+function ps2ScriptItems(ch) {
+  if (ch.type !== 'PS2') return [];
+  return [
+    { text: t('编辑测试脚本…'), fn: () => editPs2Script(ch) },
+    { text: ch.state.running ? t('停止脚本') : t('运行脚本'), fn: () => togglePs2Script(ch) },
+  ];
+}
+function editPs2Script(ch) {
+  const sample = [
+    t('# 每行一条指令, # 与空行忽略:'),
+    t('#   type 文本    输入文本 (支持大写/符号)'),
+    t('#   sleep 500   等待 500 毫秒'),
+    t('#   key Enter   按键 (Enter/Space/ArrowUp/F1…)'),
+    'type hello',
+    'sleep 500',
+    'type 123',
+    'key Enter',
+  ].join('\n');
+  Dialog.prompt({
+    title: tf('PS/2 测试脚本 — {t}', { t: ch.props.label || ch.type + '#' + ch.id }),
+    label: t('type 文本 | sleep 毫秒 | key 键名 (# 注释):'),
+    value: ch.state.script || sample,
+    multiline: true, rows: 12,
+    okText: t('保存'),
+  }).then(s => {
+    if (s == null) return;
+    ch.state.script = s;
+    scheduleSave();
+    toast(t('测试脚本已保存'));
+  });
+}
+function togglePs2Script(ch) {
+  if (ch.state.running) {
+    ch.state.running = false;
+    delete ch.state.run;
+    draw();
+    toast(t('脚本已停止'));
+    return;
+  }
+  const acts = ps2ParseScript(ch.state.script || '');
+  if (!acts.length) { toast(t('脚本为空: 右键 → 编辑测试脚本'), 'warn'); return; }
+  ch.state.running = true;
+  ch.state.run = { acts, i: 0, ci: 0 };
+  sim.evalChip(ch);
+  draw();
+  toast(tf('脚本开始运行 ({n} 条动作)', { n: acts.length }));
+}
+
+window.addEventListener('ps2scriptdone', e => {
+  const ch = app.kbChip && app.kbChip.id === e.detail.id ? app.kbChip : [...sim.chips.values()].find(c => c.id === e.detail.id);
+  if (ch) ch.state.running = false;
+  draw();
+  toast(t('PS/2 脚本运行完成'));
+});
+
 /** PS/2 打字聚焦 (仅 PS2 元件); 聚焦期间所有按键被捕获为扫描码 */
 function setKbFocus(ch) {
   const on = !!(ch && ch.type === 'PS2');
   app.kbChip = on ? ch : null;
-  if (on) { app.wiring = null; app.bbWiring = null; toast('键盘聚焦: 直接打字发送扫描码, Esc 退出'); }
+  if (on) { app.wiring = null; app.bbWiring = null; toast(t('键盘聚焦: 直接打字发送扫描码, Esc 退出')); }
   draw();
 }
 
@@ -1551,17 +1590,17 @@ function buildLib(filter) {
   const f = (filter || '').trim().toLowerCase();
   for (const cat of CAT_ORDER) {
     const items = Object.values(LIB).filter(d => d.cat === cat &&
-      (!f || d.type.toLowerCase().includes(f) || d.desc.toLowerCase().includes(f) || String(d.type).includes(f)));
+      (!f || d.type.toLowerCase().includes(f) || d.desc.toLowerCase().includes(f) || t(d.desc).toLowerCase().includes(f) || String(d.type).includes(f)));
     if (!items.length) continue;
     const h = document.createElement('div');
     h.className = 'lib-cat';
-    h.textContent = cat;
+    h.textContent = t(cat);
     libEl.appendChild(h);
     for (const d of items) {
       const el = document.createElement('div');
       el.className = 'lib-item';
-      el.innerHTML = `<b>${d.type}</b><span>${d.desc}</span>`;
-      el.title = d.desc + ' — 点击或拖拽放置';
+      el.innerHTML = `<b>${d.type}</b><span>${t(d.desc)}</span>`;
+      el.title = tf('{d} — 点击或拖拽放置', { d: t(d.desc) });
       bindLibItem(el, d.type);
       libEl.appendChild(el);
     }
@@ -1681,7 +1720,7 @@ function placeChip(type, x, y) {
   const ch = sim.addChip(type, x, y);
   selectOnly('chip', ch.id);
   scheduleSave();
-  toast('已放置 ' + type + ' (' + LIB[type].desc + ')');
+  toast(tf('已放置 {t} ({d})', { t: type, d: t(LIB[type].desc) }));
 }
 
 document.getElementById('search').addEventListener('input', e => buildLib(e.target.value));
@@ -1691,14 +1730,14 @@ document.getElementById('search').addEventListener('input', e => buildLib(e.targ
 function toggleRun() { sim.setRunning(!sim.running); syncRun(); }
 function syncRun() {
   const st = document.getElementById('stState');
-  st.textContent = sim.running ? '● 运行中' : '‖ 已暂停';
+  st.textContent = sim.running ? t('● 运行中') : t('‖ 已暂停');
   st.className = sim.running ? 'ok' : 'paused';
   Menus.refresh();
 }
 function setSpeed(v) { app.speed = v; Menus.refresh(); }
 function simStep() {
   const n = sim.stepClocks();
-  if (!n) toast('没有时钟源 — 已处理待定事件');
+  if (!n) toast(t('没有时钟源 — 已处理待定事件'));
 }
 function fitDispatch() {
   if (app.mode === 'breadboard') fitBreadboard();
@@ -1717,14 +1756,14 @@ function deleteDispatch() {
 }
 async function fileNew() {
   if (sim.chips.size && !(await Dialog.confirm({
-    title: '新建画布',
-    message: '清空当前电路? (可用 Ctrl+Z 撤销)',
-    okText: '清空', danger: true,
+    title: t('新建画布'),
+    message: t('清空当前电路? (可用 Ctrl+Z 撤销)'),
+    okText: t('清空'), danger: true,
   }))) return;
   pushUndo();
   restoreSave({ chips: [], wires: [] });
   doSave(true);
-  toast('已清空');
+  toast(t('已清空'));
   Menus.refresh();
 }
 function fileExportJSON() {
@@ -1754,70 +1793,70 @@ function setBBLabels(v) {
 function bbActAuto() { bbAutoAll(true); Menus.refresh(); }
 function bbActPlace() {
   pushUndo(); BB.autoPlace(sim); applyBB(); scheduleSave();
-  toast('已重新摆放元件'); Menus.refresh();
+  toast(t('已重新摆放元件')); Menus.refresh();
 }
 function bbActClear() {
   if (!app.bb.jumpers.length) return;
   pushUndo(); app.bb.jumpers = []; applyBB(); scheduleSave();
-  toast('已清空全部跳线'); Menus.refresh();
+  toast(t('已清空全部跳线')); Menus.refresh();
 }
 function bbActAddBoard() {
-  if (BB.getBoards() >= 6) { toast('最多 6 块板'); return; }
+  if (BB.getBoards() >= 6) { toast(t('最多 6 块板')); return; }
   pushUndo();
   BB.setBoards(BB.getBoards() + 1);
   fitBreadboard(); app.cams.breadboard.fitted = true; scheduleSave();
-  toast('已添加一块面包板 (共 ' + BB.getBoards() + ' 块)'); Menus.refresh();
+  toast(tf('已添加一块面包板 (共 {n} 块)', { n: BB.getBoards() })); Menus.refresh();
 }
 function bbActDelBoard() {
-  if (BB.getBoards() <= 1) { toast('至少保留 1 块板'); return; }
+  if (BB.getBoards() <= 1) { toast(t('至少保留 1 块板')); return; }
   pushUndo();
   const n0 = Array.from(sim.chips.values()).filter(c => c.bb).length;
   BB.setBoards(BB.getBoards() - 1);
   bbSanitize(); applyBB(); fitBreadboard(); app.cams.breadboard.fitted = true; scheduleSave();
   const rm = n0 - Array.from(sim.chips.values()).filter(c => c.bb).length;
-  toast('已移除一块板 (剩 ' + BB.getBoards() + ' 块)' + (rm ? '，' + rm + ' 个元件移回托盘' : ''));
+  toast(tf('已移除一块板 (剩 {n} 块)', { n: BB.getBoards() }) + (rm ? tf('，{n} 个元件移回托盘', { n: rm }) : ''));
   Menus.refresh();
 }
 async function bbActCols() {
   const ok = await Dialog.prompt({
-    title: '面包板列数',
-    label: '列数 (20 ~ 240)。常见: 30 = 半尺寸, 60 = 全尺寸, 63 = 常见规格:',
+    title: t('面包板列数'),
+    label: t('列数 (20 ~ 240)。常见: 30 = 半尺寸, 60 = 全尺寸, 63 = 常见规格:'),
     value: String(BB.getCols()),
     validate: s => {
       const n = parseInt(s, 10);
-      return (isNaN(n) || n < 20 || n > 240) ? '请输入 20 ~ 240 之间的整数' : null;
+      return (isNaN(n) || n < 20 || n > 240) ? t('请输入 20 ~ 240 之间的整数') : null;
     },
   });
   if (ok == null) return;
   const n = parseInt(ok, 10);
-  if (isNaN(n) || n < 20 || n > 240) { toast('无效列数 (需 20~240)', 'err'); return; }
+  if (isNaN(n) || n < 20 || n > 240) { toast(t('无效列数 (需 20~240)'), 'err'); return; }
   pushUndo();
   const n0 = Array.from(sim.chips.values()).filter(c => c.bb).length;
   BB.setCols(n); bbSanitize(); applyBB();
   fitBreadboard(); app.cams.breadboard.fitted = true; scheduleSave();
   const rm = n0 - Array.from(sim.chips.values()).filter(c => c.bb).length;
-  toast('面包板已设为 ' + BB.getCols() + ' 列' + (rm > 0 ? ' (⚠ ' + rm + ' 个超范围元件移回托盘)' : ''));
+  toast(tf('面包板已设为 {n} 列', { n: BB.getCols() }) + (rm > 0 ? tf(' (⚠ {n} 个超范围元件移回托盘)', { n: rm }) : ''));
   Menus.refresh();
 }
 /* ---------- PCB 动作 ---------- */
 function pcbActAuto() {
   pushUndo(); PCB.autoPlace(sim); scheduleSave();
-  toast('已自动布局'); Menus.refresh();
+  toast(t('已自动布局')); Menus.refresh();
 }
 async function pcbActExport() {
   const unplaced = Array.from(sim.chips.values()).filter(c => !c.pcb);
   if (unplaced.length && !(await Dialog.confirm({
-    title: '导出立创EDA PCB',
-    message: unplaced.length + ' 个元件尚未布局, 导出将忽略它们. 继续?',
-    okText: '导出',
+    title: t('导出立创EDA PCB'),
+    message: tf('{n} 个元件尚未布局, 导出将忽略它们. 继续?', { n: unplaced.length }),
+    okText: t('导出'),
   }))) return;
   const r = EasyEDAExport.buildEasyEDA(sim, PCB);
   downloadBlob(r.json, '74vm-pcb-easyeda.json');
-  toast('已导出立创EDA PCB — 在立创EDA(标准版) 文件→导入→EasyEDA 打开, 焊盘带网络可直接自动布线');
+  toast(t('已导出立创EDA PCB — 在立创EDA(标准版) 文件→导入→EasyEDA 打开, 焊盘带网络可直接自动布线'));
 }
 function pcbActNetlist() {
   downloadBlob(JSON.stringify(EasyEDAExport.buildNetlist(sim, PCB), null, 2), '74vm-netlist.json');
-  toast('已导出网表 JSON');
+  toast(t('已导出网表 JSON'));
 }
 
 /* ---------- 菜单栏 ---------- */
@@ -1827,61 +1866,66 @@ const Menus = {
     const bb = () => app.mode === 'breadboard';
     const pcb = () => app.mode === 'pcb';
     return [
-      { label: '文件(F)', items: [
-        { label: '新建画布', act: fileNew },
+      { label: t('文件(F)'), items: [
+        { label: t('新建画布'), act: fileNew },
         { sep: true },
-        { label: '导入 JSON…', act: fileImportPick },
-        { label: '导出 JSON…', act: fileExportJSON },
-        { label: '保存到浏览器', act: () => { doSave(); Menus.refresh(); } },
+        { label: t('导入 JSON…'), act: fileImportPick },
+        { label: t('导出 JSON…'), act: fileExportJSON },
+        { label: t('保存到浏览器'), act: () => { doSave(); Menus.refresh(); } },
         { sep: true },
-        { label: '示例电路', sub: window.EXAMPLES.map(ex => ({
-          label: ex.name, hint: ex.desc, act: () => { loadExample(ex); Menus.refresh(); },
+        { label: t('示例电路'), sub: window.EXAMPLES.map(ex => ({
+          label: t(ex.name), hint: t(ex.desc), act: () => { loadExample(ex); Menus.refresh(); },
         })) },
-      ]},
-      { label: '编辑(E)', items: [
-        { label: '撤销', hint: 'Ctrl+Z', act: () => { undo(); Menus.refresh(); }, enabled: () => app.undoStack.length > 0 },
-        { label: '重做', hint: 'Ctrl+Y', act: () => { redo(); Menus.refresh(); }, enabled: () => app.redoStack.length > 0 },
         { sep: true },
-        { label: '旋转选中', hint: 'R', act: rotateDispatch },
-        { label: '复制选中', hint: 'Ctrl+D', act: () => duplicateSelection() },
-        { label: '删除选中', hint: 'Del', act: deleteDispatch },
+        { label: t('语言'), sub: [
+          { label: '中文', radio: 'lang', val: 'zh', act: () => setLang('zh') },
+          { label: 'English', radio: 'lang', val: 'en', act: () => setLang('en') },
+        ]},
       ]},
-      { label: '视图(V)', items: [
-        { label: '适配视图', act: fitDispatch },
-        { label: '元件库', hint: '侧栏', radio: 'lib', act: toggleLib },
-        { label: '元件标识 (面包板)', hint: '关=悬停显示', radio: 'labels', act: () => setBBLabels(!app.bbLabels) },
+      { label: t('编辑(E)'), items: [
+        { label: t('撤销'), hint: 'Ctrl+Z', act: () => { undo(); Menus.refresh(); }, enabled: () => app.undoStack.length > 0 },
+        { label: t('重做'), hint: 'Ctrl+Y', act: () => { redo(); Menus.refresh(); }, enabled: () => app.redoStack.length > 0 },
         { sep: true },
-        { label: '原理图模式', hint: '1', radio: 'mode', val: 'schematic', act: () => switchMode('schematic') },
-        { label: '面包板模式', hint: '2', radio: 'mode', val: 'breadboard', act: () => switchMode('breadboard') },
-        { label: 'PCB 模式', hint: '3', radio: 'mode', val: 'pcb', act: () => switchMode('pcb') },
+        { label: t('旋转选中'), hint: 'R', act: rotateDispatch },
+        { label: t('复制选中'), hint: 'Ctrl+D', act: () => duplicateSelection() },
+        { label: t('删除选中'), hint: 'Del', act: deleteDispatch },
       ]},
-      { label: '仿真(S)', items: [
-        { label: () => (sim.running ? '暂停' : '运行'), hint: '空格', act: toggleRun },
-        { label: '时钟步进', hint: '半周期', act: simStep },
+      { label: t('视图(V)'), items: [
+        { label: t('适配视图'), act: fitDispatch },
+        { label: t('元件库'), hint: t('侧栏'), radio: 'lib', act: toggleLib },
+        { label: t('元件标识 (面包板)'), hint: t('关=悬停显示'), radio: 'labels', act: () => setBBLabels(!app.bbLabels) },
         { sep: true },
-        { label: '速度 ×1', radio: 'speed', val: 1, act: () => setSpeed(1) },
-        { label: '速度 ×10', radio: 'speed', val: 10, act: () => setSpeed(10) },
-        { label: '速度 ×100', radio: 'speed', val: 100, act: () => setSpeed(100) },
-        { label: '速度 ×1000', radio: 'speed', val: 1000, act: () => setSpeed(1000) },
+        { label: t('原理图模式'), hint: '1', radio: 'mode', val: 'schematic', act: () => switchMode('schematic') },
+        { label: t('面包板模式'), hint: '2', radio: 'mode', val: 'breadboard', act: () => switchMode('breadboard') },
+        { label: t('PCB 模式'), hint: '3', radio: 'mode', val: 'pcb', act: () => switchMode('pcb') },
       ]},
-      { label: '工具(T)', items: [
-        { label: '面包板', sub: [
-          { label: '✨ 自动布线 (从原理图)', act: bbActAuto, enabled: bb },
-          { label: '重新摆放元件', act: bbActPlace, enabled: bb },
-          { label: '清空全部跳线', act: bbActClear, enabled: () => app.mode === 'breadboard' && app.bb.jumpers.length > 0 },
+      { label: t('仿真(S)'), items: [
+        { label: () => (sim.running ? t('暂停') : t('运行')), hint: t('空格'), act: toggleRun },
+        { label: t('时钟步进'), hint: t('半周期'), act: simStep },
+        { sep: true },
+        { label: t('速度 ×1'), radio: 'speed', val: 1, act: () => setSpeed(1) },
+        { label: t('速度 ×10'), radio: 'speed', val: 10, act: () => setSpeed(10) },
+        { label: t('速度 ×100'), radio: 'speed', val: 100, act: () => setSpeed(100) },
+        { label: t('速度 ×1000'), radio: 'speed', val: 1000, act: () => setSpeed(1000) },
+      ]},
+      { label: t('工具(T)'), items: [
+        { label: t('面包板'), sub: [
+          { label: t('✨ 自动布线 (从原理图)'), act: bbActAuto, enabled: bb },
+          { label: t('重新摆放元件'), act: bbActPlace, enabled: bb },
+          { label: t('清空全部跳线'), act: bbActClear, enabled: () => app.mode === 'breadboard' && app.bb.jumpers.length > 0 },
           { sep: true },
-          { label: '添加一块板子', act: bbActAddBoard, enabled: () => app.mode === 'breadboard' && BB.getBoards() < 6 },
-          { label: '移除一块板子', act: bbActDelBoard, enabled: () => app.mode === 'breadboard' && BB.getBoards() > 1 },
-          { label: '设置列数…', act: bbActCols, enabled: bb },
+          { label: t('添加一块板子'), act: bbActAddBoard, enabled: () => app.mode === 'breadboard' && BB.getBoards() < 6 },
+          { label: t('移除一块板子'), act: bbActDelBoard, enabled: () => app.mode === 'breadboard' && BB.getBoards() > 1 },
+          { label: t('设置列数…'), act: bbActCols, enabled: bb },
         ]},
         { label: 'PCB', sub: [
-          { label: '自动布局', act: pcbActAuto, enabled: pcb },
-          { label: '导出立创EDA PCB…', act: pcbActExport, enabled: pcb },
-          { label: '导出网表 JSON…', act: pcbActNetlist, enabled: pcb },
+          { label: t('自动布局'), act: pcbActAuto, enabled: pcb },
+          { label: t('导出立创EDA PCB…'), act: pcbActExport, enabled: pcb },
+          { label: t('导出网表 JSON…'), act: pcbActNetlist, enabled: pcb },
         ]},
       ]},
-      { label: '帮助(H)', items: [
-        { label: '❓ 使用帮助', act: () => showModal(true) },
+      { label: t('帮助(H)'), items: [
+        { label: t('❓ 使用帮助'), act: () => showModal(true) },
       ]},
     ];
   },
@@ -1890,6 +1934,7 @@ const Menus = {
     if (it.radio === 'speed') return app.speed === it.val;
     if (it.radio === 'lib') return app.libShown;
     if (it.radio === 'labels') return app.bbLabels;
+    if (it.radio === 'lang') return I18N.lang === it.val;
     return false;
   },
   build() {
@@ -1973,6 +2018,35 @@ const Menus = {
     if (open >= 0) this.openMenu(open);
   },
 };
+
+/* ---------- 界面语言 ----------
+ * 动态创建的文案 (菜单/对话框/toast/画布) 在各自渲染点经 t()/tf() 翻译;
+ * 这里只负责静态 HTML (标题/搜索框/帮助) 与菜单栏重建。 */
+function applyLang() {
+  document.title = t('74VM · 74系列数字电路模拟器');
+  document.documentElement.lang = I18N.lang === 'en' ? 'en' : 'zh-CN';
+  const search = document.getElementById('search');
+  if (search) search.placeholder = t('搜索元件');
+  const sideToggle = document.getElementById('sideToggle');
+  if (sideToggle) sideToggle.title = t('收起/展开元件库');
+  const helpHead = document.querySelector('#helpModal .modal-head b');
+  if (helpHead) helpHead.textContent = t('74VM 使用帮助');
+  const btnHelpClose = document.getElementById('btnHelpClose');
+  if (btnHelpClose) btnHelpClose.textContent = t('✕ 关闭');
+  const helpBody = document.getElementById('helpBody');
+  if (helpBody) {
+    if (!helpBody.dataset.zh) helpBody.dataset.zh = helpBody.innerHTML;   // 首次缓存中文原文
+    helpBody.innerHTML = I18N.lang === 'en' ? I18N.EN_HELP : helpBody.dataset.zh;
+  }
+  Menus.build();
+  buildLib((document.getElementById('search') || {}).value || '');
+  updateStatus();
+  syncRun();
+}
+function setLang(l) {
+  I18N.setLang(l);
+  applyLang();
+}
 function closeAllMenus() {
   Menus.closeAll();
   document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
@@ -2005,7 +2079,7 @@ function loadExample(ex) {
   else if (app.mode === 'pcb') fitPCB();
   else fitView();
   scheduleSave();
-  toast('已加载示例: ' + ex.name);
+  toast(tf('已加载示例: {n}', { n: t(ex.name) }));
 }
 
 /* 文件导入 (fileImportPick 触发) */
@@ -2016,14 +2090,14 @@ document.getElementById('fileImport').addEventListener('change', e => {
   rd.onload = () => {
     try {
       const data = JSON.parse(rd.result);
-      if (!data || !Array.isArray(data.chips)) throw new Error('格式不符');
+      if (!data || !Array.isArray(data.chips)) throw new Error(t('格式不符'));
       pushUndo();
       restoreSave(data);
       fitView();
       scheduleSave();
-      toast('导入成功: ' + data.chips.length + ' 个元件');
+      toast(tf('导入成功: {n} 个元件', { n: data.chips.length }));
     } catch (err) {
-      toast('导入失败: ' + err.message, 'err');
+      toast(tf('导入失败: {m}', { m: err.message }), 'err');
     }
   };
   rd.readAsText(f);
@@ -2060,14 +2134,14 @@ function fitView() {
 function updateStatus() {
   document.getElementById('stTime').textContent = 't = ' + (sim.simTime / 1000).toFixed(2) + ' ms';
   document.getElementById('stCount').textContent =
-    '元件 ' + sim.chips.size + ' · 导线 ' + sim.wires.length + ' · 事件 ' + fmtNum(sim.eventCount);
-  document.getElementById('stZoom').textContent = '缩放 ' + Math.round(app.cam.zoom * 100) + '%';
-  let wtxt = sim.overload ? '⚠ 事件过载(电路可能振荡或规模过大)' : '';
+    tf('元件 {c} · 导线 {w} · 事件 {e}', { c: sim.chips.size, w: sim.wires.length, e: fmtNum(sim.eventCount) });
+  document.getElementById('stZoom').textContent = tf('缩放 {n}%', { n: Math.round(app.cam.zoom * 100) });
+  let wtxt = sim.overload ? t('⚠ 事件过载(电路可能振荡或规模过大)') : '';
   if (app.mode === 'breadboard') {
     let n = 0;
     for (const ch of sim.chips.values())
       if (ch.bb && ch.powered === false) n++;   // DIP 与有源虚拟元件 (CLOCK/PS2)
-    if (n) wtxt += (wtxt ? '  ·  ' : '') + '⚡ ' + n + ' 颗芯片未接电源 (VCC/GND 列 → 电源轨)';
+    if (n) wtxt += (wtxt ? '  ·  ' : '') + tf('⚡ {n} 颗芯片未接电源 (VCC/GND 列 → 电源轨)', { n });
   }
   const warn = document.getElementById('stWarn');
   warn.textContent = wtxt;
@@ -2075,6 +2149,7 @@ function updateStatus() {
 }
 
 function fmtNum(n) {
+  if (I18N.lang === 'en') return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
   return n >= 10000 ? (n / 10000).toFixed(1) + '万' : String(n);
 }
 
@@ -2122,13 +2197,13 @@ function switchMode(m) {
     if (!app.bb.placed && sim.chips.size) bbAutoAll(false);
     else applyBB();
     if (!app.cams.breadboard.fitted) { fitBreadboard(); app.cams.breadboard.fitted = true; }
-    toast('面包板模式 — 按住孔位拖动拉跳线, ✨自动布线可从原理图生成接线');
+    toast(t('面包板模式 — 按住孔位拖动拉跳线, ✨自动布线可从原理图生成接线'));
   } else if (m === 'pcb') {
     let need = false;
     for (const ch of sim.chips.values()) if (!ch.pcb) need = true;
-    if (need && sim.chips.size) { pushUndo(); PCB.autoPlace(sim); toast('已按原理图顺序自动布局封装'); }
+    if (need && sim.chips.size) { pushUndo(); PCB.autoPlace(sim); toast(t('已按原理图顺序自动布局封装')); }
     if (!app.cams.pcb.fitted) { fitPCB(); app.cams.pcb.fitted = true; }
-    toast('PCB 模式 — 拖动/旋转封装, 📤 导出立创EDA 后可在其内自动布线');
+    toast(t('PCB 模式 — 拖动/旋转封装, 📤 导出立创EDA 后可在其内自动布线'));
   }
   updateStatus();
   scheduleSave();   // 记住上次使用的模式
@@ -2219,9 +2294,9 @@ function bbUpdatePower() {
 async function bbAutoAll(interactive) {
   if (interactive && app.bb.jumpers.length &&
       !(await Dialog.confirm({
-        title: '重新自动布线',
-        message: '重新自动布线将覆盖现有 ' + app.bb.jumpers.length + ' 根跳线, 继续?',
-        okText: '覆盖重布',
+        title: t('重新自动布线'),
+        message: tf('重新自动布线将覆盖现有 {n} 根跳线, 继续?', { n: app.bb.jumpers.length }),
+        okText: t('覆盖重布'),
       }))) return;
   pushUndo();
   BB.autoPlace(sim);
@@ -2231,8 +2306,8 @@ async function bbAutoAll(interactive) {
   app.bb.placed = true;
   applyBB();
   scheduleSave();
-  toast('已自动摆放并接线: ' + r.jumpers.length + ' 根跳线' +
-        (r.warn ? ' (⚠ ' + r.warn + ' 处孔位紧张)' : ''));
+  toast(tf('已自动摆放并接线: {n} 根跳线', { n: r.jumpers.length }) +
+        (r.warn ? tf(' (⚠ {n} 处孔位紧张)', { n: r.warn }) : ''));
 }
 
 /** 面包板孔位 → 网络电平值 */
@@ -2371,7 +2446,7 @@ function placeChipBB(type, wx, wy) {
   app.bb.placed = true;
   selectOnly('chip', ch.id);
   scheduleSave();
-  toast('已放置到面包板: ' + type);
+  toast(tf('已放置到面包板: {t}', { t: type }));
 }
 
 /** y 坐标 → 最近板号 */
@@ -2529,8 +2604,8 @@ function bbPointerMove(e) {
     const ci = h.indexOf(':');
     const rest = h.slice(ci + 1);
     tooltipEl.textContent = rest[0] === 'R'
-      ? ('板' + (+h.slice(0, ci) + 1) + ' 电源轨 ' + rest.replace('-', ' 列'))
-      : ('板' + (+h.slice(0, ci) + 1) + ' 孔位 ' + rest + ' (同列5孔连通)');
+      ? tf('板{n} 电源轨 {r} 列{c}', { n: +h.slice(0, ci) + 1, r: rest.replace('-', ''), c: rest.replace(/[^-]+-/, '') })
+      : tf('板{n} 孔位 {h} (同列5孔连通)', { n: +h.slice(0, ci) + 1, h: rest });
     tooltipEl.style.display = 'block';
     const p = BB.holePos(h);
     tooltipEl.style.left = ((p.x - app.cam.x) * app.cam.zoom + CW / 2 + 12) + 'px';
@@ -2587,34 +2662,41 @@ function bbPointerUp(e) {
 
 function bbContextMenu(e) {
   const w = toWorld(e);
+  const tray = trayItemAt(w, 'breadboard');
+  if (tray) {
+    selectOnly('chip', tray.ch.id);
+    showCtxMenu(e.clientX, e.clientY, [{ text: t('删除'), fn: () => deleteChip(tray.ch) }]);
+    return;
+  }
   const ch = bbChipAt(w);
   if (ch) {
     selectOnly('chip', ch.id);
     const items = [];
-    if (!LIB[ch.type].custom) items.push({ text: '翻转 180° (R)', fn: () => bbFlip(ch) });
+    if (!LIB[ch.type].custom) items.push({ text: t('翻转 180° (R)'), fn: () => bbFlip(ch) });
     if (ch.type === 'CLOCK') {
-      items.push({ text: '编辑频率…', fn: () => editLabelOrFreq(ch) });
-      items.push({ text: '编辑标签…', fn: () => editLabel(ch) });
+      items.push({ text: t('编辑频率…'), fn: () => editLabelOrFreq(ch) });
+      items.push({ text: t('编辑标签…'), fn: () => editLabel(ch) });
     } else {
-      items.push({ text: '编辑标签…', fn: () => editLabelOrFreq(ch) });
+      items.push({ text: t('编辑标签…'), fn: () => editLabelOrFreq(ch) });
     }
-    if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? '退出打字 (Esc)' : '聚焦打字…', fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
-    if (ch.type === 'KB44') items.push({ text: '行脚空闲电平: ' + (Number(ch.props.pull) ? '上拉 1' : '下拉 0') + ' (点击切换)', fn: () => { ch.props.pull = Number(ch.props.pull) ? 0 : 1; sim.evalChip(ch); sim.flush(); sim.touch(); scheduleSave(); } });
+    if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? t('退出打字 (Esc)') : t('聚焦打字…'), fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
+    if (ch.type === 'KB44') items.push({ text: tf('行脚空闲电平: {v} (点击切换)', { v: t(Number(ch.props.pull) ? '上拉 1' : '下拉 0') }), fn: () => { ch.props.pull = Number(ch.props.pull) ? 0 : 1; sim.evalChip(ch); sim.flush(); sim.touch(); scheduleSave(); } });
     items.push(...memoryMenuItems(ch));
-    items.push({ text: '移出面包板 (Del)', fn: () => bbUnplace(ch) });
-    items.push({ text: '彻底删除元件', fn: () => deleteChip(ch) });
+    items.push(...ps2ScriptItems(ch));
+    items.push({ text: t('移出面包板 (Del)'), fn: () => bbUnplace(ch) });
+    items.push({ text: t('删除'), fn: () => deleteChip(ch) });
     showCtxMenu(e.clientX, e.clientY, items);
     return;
   }
   const j = bbJumperAt(w);
   if (j) {
     selectOnly('jumper', j.id);
-    showCtxMenu(e.clientX, e.clientY, [{ text: '删除跳线', fn: () => bbDeleteJumper(j) }]);
+    showCtxMenu(e.clientX, e.clientY, [{ text: t('删除跳线'), fn: () => bbDeleteJumper(j) }]);
     return;
   }
   showCtxMenu(e.clientX, e.clientY, [
-    { text: '✨ 自动布线 (从原理图)', fn: () => bbAutoAll(true) },
-    { text: '⤢ 适配视图', fn: fitBreadboard },
+    { text: t('✨ 自动布线 (从原理图)'), fn: () => bbAutoAll(true) },
+    { text: t('⤢ 适配视图'), fn: fitBreadboard },
   ]);
 }
 
@@ -2627,7 +2709,7 @@ function bbUnplace(ch) {
   pushUndo();
   ch.bb = null;
   applyBB(); scheduleSave();
-  toast('已移出面包板 (元件仍保留在电路中)');
+  toast(t('已移出面包板 (元件仍保留在电路中)'));
 }
 function bbDeleteJumper(j) {
   pushUndo();
@@ -2645,7 +2727,7 @@ function bbDeleteSelection() {
       if (j) { bbDeleteJumper(j); n++; }
     }
   }
-  if (!n) toast('没有选中项');
+  if (!n) toast(t('没有选中项'));
 }
 function bbRotateSelection() {
   for (const s of app.selection) {
@@ -2685,12 +2767,12 @@ function memChipName(ch) {
 function editMem(ch) {
   const m = memCfg(ch);
   Dialog.prompt({
-    title: ch.type + ' 内容 — ' + memChipName(ch) + ' (' + m.size + '×' + (m.mask >= 0xFF ? 8 : 4) + ')',
-    label: '每字节 2 位十六进制, 空格分隔 (每行 16 字节). 可直接粘贴导入, 不足部分补 00:',
+    title: tf('{t} 内容 — {n} ({s}×{w})', { t: ch.type, n: memChipName(ch), s: m.size, w: m.mask >= 0xFF ? 8 : 4 }),
+    label: t('每字节 2 位十六进制, 空格分隔 (每行 16 字节). 可直接粘贴导入, 不足部分补 00:'),
     value: memToHex(ch.props.mem || []),
     multiline: true,
-    okText: '写入',
-    validate: s => parseHexMem(s, m.size, m.mask) == null ? '格式无效: 只允许十六进制字节 (00 ~ FF)' : null,
+    okText: t('写入'),
+    validate: s => parseHexMem(s, m.size, m.mask) == null ? t('格式无效: 只允许十六进制字节 (00 ~ FF)') : null,
   }).then(s => {
     if (s == null) return;
     pushUndo();
@@ -2698,25 +2780,25 @@ function editMem(ch) {
     sim.touch();
     sim.reevalAll();   // 内容变化不经过引脚事件, 需重评估全部元件
     scheduleSave();
-    toast(ch.type + ' 内容已写入');
+    toast(tf('{t} 内容已写入', { t: ch.type }));
   });
 }
 function memSnapshot(ch) {
   const hex = memToHex(ch.props.mem || []);
   Dialog.prompt({
-    title: ch.type + ' 快照 — ' + memChipName(ch),
-    message: '当前 ' + ch.props.mem.length + ' 字节内容 (已尝试复制到剪贴板):',
-    value: hex, multiline: true, okText: '关闭',
+    title: tf('{t} 快照 — {n}', { t: ch.type, n: memChipName(ch) }),
+    message: tf('当前 {n} 字节内容 (已尝试复制到剪贴板):', { n: ch.props.mem.length }),
+    value: hex, multiline: true, okText: t('关闭'),
   });
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(hex).then(() => toast('快照已复制到剪贴板')).catch(() => { });
+    navigator.clipboard.writeText(hex).then(() => toast(t('快照已复制到剪贴板'))).catch(() => { });
   }
 }
 function exportMem(ch) {
   const base = ch.props.label ? ch.props.label.replace(/[\\/:*?"<>|]+/g, '_') : ch.type + ch.id;
   const fn = base + '.' + ch.type.toLowerCase() + '.hex';
   downloadBlob(memToHex(ch.props.mem || []), fn);
-  toast('已导出 ' + fn);
+  toast(tf('已导出 {f}', { f: fn }));
 }
 /** LCD1602: 编辑显示文本 / 清屏 */
 function lcdLinesText(ch) {
@@ -2727,15 +2809,15 @@ function lcdLinesText(ch) {
 }
 function editLcdText(ch) {
   Dialog.prompt({
-    title: '1602 显示文本 — ' + memChipName(ch),
-    label: '共 2 行, 每行最多 16 个字符 (支持中文):',
+    title: tf('1602 显示文本 — {n}', { n: memChipName(ch) }),
+    label: t('共 2 行, 每行最多 16 个字符 (支持中文):'),
     value: lcdLinesText(ch),
     multiline: true, rows: 4,
-    okText: '显示',
+    okText: t('显示'),
     validate: s => {
       const ls = s.split('\n');
-      if (ls.length > 2) return '最多 2 行';
-      if (ls.some(l => [...l].length > 16)) return '每行最多 16 个字符';
+      if (ls.length > 2) return t('最多 2 行');
+      if (ls.some(l => [...l].length > 16)) return t('每行最多 16 个字符');
       return null;
     },
   }).then(s => {
@@ -2748,29 +2830,29 @@ function editLcdText(ch) {
     ch.state.ddram = dd;
     ch.state.cur = 0;
     scheduleSave();
-    toast('显示文本已更新');
+    toast(t('显示文本已更新'));
   });
 }
 function clearLcd(ch) {
   ch.state.ddram = new Array(80).fill(' ');
   ch.state.cur = 0;
   scheduleSave();
-  toast('已清屏');
+  toast(t('已清屏'));
 }
 /** LCD12864: 编辑显示文本 / 清屏 / 清除图形 */
 function editLcd12864Text(ch) {
   const dd = ch.state.ddram;
   const lines = [0, 1, 2, 3].map(r => dd.slice(r * 16, r * 16 + 16).join('').replace(/\s+$/, ''));
   Dialog.prompt({
-    title: '12864 显示文本 — ' + memChipName(ch),
-    label: '共 4 行, 每行最多 16 个字符 (支持中文):',
+    title: tf('12864 显示文本 — {n}', { n: memChipName(ch) }),
+    label: t('共 4 行, 每行最多 16 个字符 (支持中文):'),
     value: lines.join('\n'),
     multiline: true, rows: 7,
-    okText: '显示',
+    okText: t('显示'),
     validate: s => {
       const ls = s.split('\n');
-      if (ls.length > 4) return '最多 4 行';
-      if (ls.some(l => [...l].length > 16)) return '每行最多 16 个字符';
+      if (ls.length > 4) return t('最多 4 行');
+      if (ls.some(l => [...l].length > 16)) return t('每行最多 16 个字符');
       return null;
     },
   }).then(s => {
@@ -2779,34 +2861,34 @@ function editLcd12864Text(ch) {
     dd.fill(' ');
     s.split('\n').slice(0, 4).forEach((l, r) => { [...l].slice(0, 16).forEach((c, i) => { dd[r * 16 + i] = c; }); });
     scheduleSave();
-    toast('显示文本已更新');
+    toast(t('显示文本已更新'));
   });
 }
 function clearLcd12864Gfx(ch) {
   ch.state.gdram.fill(0);
   scheduleSave();
-  toast('图形层已清除');
+  toast(t('图形层已清除'));
 }
 /** 右键菜单追加项: 存储器 (按 mem 配置识别) 与 LCD1602 */
 function memoryMenuItems(ch) {
   if (ch.type === 'LCD12864') return [
-    { text: '编辑显示文本…', fn: () => editLcd12864Text(ch) },
-    { text: '清屏', fn: () => { pushUndo(); ch.state.ddram.fill(' '); ch.state.gdram.fill(0); sim.touch(); sim.reevalAll(); scheduleSave(); toast('已清屏'); } },
-    { text: '清除图形', fn: () => clearLcd12864Gfx(ch) },
+    { text: t('编辑显示文本…'), fn: () => editLcd12864Text(ch) },
+    { text: t('清屏'), fn: () => { pushUndo(); ch.state.ddram.fill(' '); ch.state.gdram.fill(0); sim.touch(); sim.reevalAll(); scheduleSave(); toast(t('已清屏')); } },
+    { text: t('清除图形'), fn: () => clearLcd12864Gfx(ch) },
   ];
   if (ch.type === 'LCD1602') return [
-    { text: '编辑显示文本…', fn: () => editLcdText(ch) },
-    { text: '清屏', fn: () => clearLcd(ch) },
+    { text: t('编辑显示文本…'), fn: () => editLcdText(ch) },
+    { text: t('清屏'), fn: () => clearLcd(ch) },
   ];
   const m = memCfg(ch);
   if (!m) return [];
   if (m.kind === 'rom') return [
-    { text: '编辑内容 (十六进制)…', fn: () => editMem(ch) },
-    { text: '导出内容 (十六进制文件)', fn: () => exportMem(ch) },
+    { text: t('编辑内容 (十六进制)…'), fn: () => editMem(ch) },
+    { text: t('导出内容 (十六进制文件)'), fn: () => exportMem(ch) },
   ];
   return [
-    { text: '获取快照 (十六进制)…', fn: () => memSnapshot(ch) },
-    { text: '导出快照 (十六进制文件)', fn: () => exportMem(ch) },
+    { text: t('获取快照 (十六进制)…'), fn: () => memSnapshot(ch) },
+    { text: t('导出快照 (十六进制文件)'), fn: () => exportMem(ch) },
   ];
 }
 
@@ -2814,12 +2896,12 @@ function editLabelOrFreq(ch) {
   if (ch.type === 'CLOCK' || ch.type === 'NE555') {
     const is555 = ch.type === 'NE555';
     Dialog.prompt({
-      title: is555 ? '振荡频率 — NE555 (由 R/C 决定)' : '时钟频率 — CLOCK',
-      label: '频率 (Hz, 0.1 ~ 20000):',
+      title: t(is555 ? '振荡频率 — NE555 (由 R/C 决定)' : '时钟频率 — CLOCK'),
+      label: t('频率 (Hz, 0.1 ~ 20000):'),
       value: String(ch.props.freq || 2),
       validate: s => {
         const f = parseFloat(s);
-        return (isNaN(f) || f < 0.1 || f > 20000) ? '请输入 0.1 ~ 20000 之间的数字' : null;
+        return (isNaN(f) || f < 0.1 || f > 20000) ? t('请输入 0.1 ~ 20000 之间的数字') : null;
       },
     }).then(s => {
       if (s == null) return;
@@ -2827,7 +2909,7 @@ function editLabelOrFreq(ch) {
       ch.props.freq = f;
       if (!is555) ch.state.nextT = sim.simTime + sim.clockHalf(ch);
       sim.touch(); scheduleSave();
-      toast((is555 ? 'NE555 振荡频率已设为 ' : '时钟已设为 ') + f + ' Hz');
+      toast(tf(is555 ? 'NE555 振荡频率已设为 {n} Hz' : '时钟已设为 {n} Hz', { n: f }));
     });
   } else {
     editLabel(ch);
@@ -3020,7 +3102,7 @@ function drawBBChip(ch, z) {
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 8px "Segoe UI","Microsoft YaHei",sans-serif';
-      ctx.fillText('未供电', rect.x + rect.w - 19, rect.y + 10);
+      ctx.fillText(t('未供电'), rect.x + rect.w - 19, rect.y + 10);
     }
     if (rect.w > 70) {
       ctx.fillStyle = '#8ba0b6';
@@ -3070,9 +3152,9 @@ function drawBBChip(ch, z) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(255,255,255,.9)';
-      ctx.strokeText('⚡未供电', bx, by);
+      ctx.strokeText(t('⚡未供电'), bx, by);
       ctx.fillStyle = '#e53935';
-      ctx.fillText('⚡未供电', bx, by);
+      ctx.fillText(t('⚡未供电'), bx, by);
     }
     // 标识 (盒外侧, 带描边; 关闭时悬停显示)
     if (ch.props.label && ch.type !== 'SEG7' && (app.bbLabels || (app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id))) {
@@ -3270,7 +3352,7 @@ function drawTray(mode, z) {
   }
   ctx.fillStyle = '#6b7a8c';
   ctx.font = '10px "Segoe UI","Microsoft YaHei",sans-serif';
-  ctx.fillText('未放置元件 (拖到' + (mode === 'breadboard' ? '面包板' : 'PCB') + '上)', items[0].x, 12);
+  ctx.fillText(tf('未放置元件 (拖到{t}上)', { t: t(mode === 'breadboard' ? '面包板' : 'PCB') }), items[0].x, 12);
 }
 
 /* ================= PCB 模式 ================= */
@@ -3282,7 +3364,7 @@ function placeChipPCB(type, wx, wy) {
   ch.pcb = { x: Math.round((wx != null ? wx : 50) * 2) / 2, y: Math.round((wy != null ? wy : 40) * 2) / 2, rot: 0 };
   selectOnly('chip', ch.id);
   scheduleSave();
-  toast('已放置封装: ' + type);
+  toast(tf('已放置封装: {t}', { t: type }));
 }
 
 function pcbChipAt(w) {
@@ -3360,22 +3442,28 @@ function pcbPointerUp(e) {
 
 function pcbContextMenu(e) {
   const w = toWorld(e);
+  const tray = trayItemAt(w, 'pcb');
+  if (tray) {
+    selectOnly('chip', tray.ch.id);
+    showCtxMenu(e.clientX, e.clientY, [{ text: t('删除'), fn: () => deleteChip(tray.ch) }]);
+    return;
+  }
   const ch = pcbChipAt(w);
   if (ch) {
     selectOnly('chip', ch.id);
     showCtxMenu(e.clientX, e.clientY, [
-      { text: '旋转 90° (R)', fn: () => pcbRotate(ch) },
-      ...(ch.type === 'CLOCK' ? [{ text: '编辑频率…', fn: () => editLabelOrFreq(ch) }] : []),
-      { text: '编辑标签…', fn: () => editLabel(ch) },
+      { text: t('旋转 90° (R)'), fn: () => pcbRotate(ch) },
+      ...(ch.type === 'CLOCK' ? [{ text: t('编辑频率…'), fn: () => editLabelOrFreq(ch) }] : []),
+      { text: t('编辑标签…'), fn: () => editLabel(ch) },
       ...memoryMenuItems(ch),
-      { text: '移出PCB (Del)', fn: () => pcbUnplace(ch) },
-      { text: '彻底删除元件', fn: () => deleteChip(ch) },
+      { text: t('移出PCB (Del)'), fn: () => pcbUnplace(ch) },
+      { text: t('删除'), fn: () => deleteChip(ch) },
     ]);
     return;
   }
   showCtxMenu(e.clientX, e.clientY, [
-    { text: '📐 自动布局', fn: () => { pushUndo(); PCB.autoPlace(sim); scheduleSave(); toast('已自动布局'); } },
-    { text: '⤢ 适配视图', fn: fitPCB },
+    { text: t('📐 自动布局'), fn: () => { pushUndo(); PCB.autoPlace(sim); scheduleSave(); toast(t('已自动布局')); } },
+    { text: t('⤢ 适配视图'), fn: fitPCB },
   ]);
 }
 
@@ -3397,7 +3485,7 @@ function pcbDeleteSelection() {
     const ch = sim.chips.get(s.id);
     if (ch) { if (!ch.pcb) deleteChip(ch); else pcbUnplace(ch); n++; }
   }
-  if (!n) toast('没有选中项');
+  if (!n) toast(t('没有选中项'));
 }
 function pcbRotateSelection() {
   for (const s of app.selection) {
@@ -3502,7 +3590,7 @@ function drawPCBChipPart(ch, padsPass) {
 
 
 
-window.addEventListener('error', e => toast('脚本错误: ' + e.message, 'err'));
+window.addEventListener('error', e => toast(tf('脚本错误: {m}', { m: e.message }), 'err'));
 
 // 调试/自动化句柄
 window._74vm = { sim, app, fitView, LIB, draw, switchMode, applyBB,
@@ -3511,6 +3599,7 @@ window._74vm = { sim, app, fitView, LIB, draw, switchMode, applyBB,
 window.addEventListener('beforeunload', () => doSave(true));
 
 buildLib('');
+applyLang();   // 应用持久化的界面语言 (标题/搜索框/帮助/菜单栏)
 syncRun();
 
 (function boot() {
@@ -3519,11 +3608,11 @@ syncRun();
   if (data && Array.isArray(data.chips) && data.chips.length) {
     restoreSave(data);
     if (!(data.view && data.view.cams)) fitView();   // 有保存的视图则不重新适配
-    toast('已恢复上次的电路 (文件菜单可新建)');
+    toast(t('已恢复上次的电路 (文件菜单可新建)'));
   } else {
     loadExample(window.EXAMPLES[0]);
     fitView();
-    toast('欢迎使用 74VM — 点击左上角 ❓ 查看帮助');
+    toast(t('欢迎使用 74VM — 点击左上角 ❓ 查看帮助'));
   }
   sim.setRunning(true);
   syncRun();

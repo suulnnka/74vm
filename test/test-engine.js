@@ -314,7 +314,7 @@ console.log('\n[15] 供电检查: 未上电时钟不振荡');
   ck.powered = false;
   const ph = ck.state.phase, tStop = sim.simTime;
   sim.advance(10000);
-  check('未上电时钟停振 (相位与时间冻结)', ck.state.phase === ph && sim.simTime === tStop,
+  check('未上电时钟停振 (相位冻结, 时间照常推进)', ck.state.phase === ph && sim.simTime === tStop + 10000,
     [ck.state.phase, sim.simTime]);
   ck.powered = true;
   const tBefore = sim.simTime;

@@ -12,11 +12,12 @@
 const Dialog = (() => {
   const wins = [];   // 存活窗口栈, 末尾 = 最上层
   let zTop = 300;    // 与 .modal 基准 z-index 一致, 每窗递增
+  const t = s => (window.I18N ? I18N.t(s) : s);   // 按钮等默认文案走多语言
 
   function open(opts) {
     const o = Object.assign({
       title: '', message: '', label: null, value: '', placeholder: '',
-      okText: '确定', cancelText: '取消', danger: false, validate: null,
+      okText: t('确定'), cancelText: t('取消'), danger: false, validate: null,
       multiline: false, rows: 0,   // true = 多行文本域 (Enter 换行, Ctrl+Enter 确定)
     }, opts);
     return new Promise(resolve => {
@@ -43,7 +44,7 @@ const Dialog = (() => {
       const title = document.createElement('b');
       title.textContent = o.title;
       const x = document.createElement('button');
-      x.className = 'btn'; x.textContent = '✕'; x.title = '取消 (Esc)';
+      x.className = 'btn'; x.textContent = '✕'; x.title = t('取消 (Esc)');
       x.onclick = () => finish(null);
       head.appendChild(title); head.appendChild(x);
 
