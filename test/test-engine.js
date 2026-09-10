@@ -323,6 +323,97 @@ console.log('\n[15] 供电检查: 未上电时钟不振荡');
   check('CLOCK 输出脚相位在 0/1 间翻转', ck.state.phase === 0 || ck.state.phase === 1);
 }
 
+console.log('\n[16] NE555 真实时钟 (无稳态振荡 / ~RST 门控 / 供电检查)');
+{
+  const sim = makeSim();
+  const t5 = sim.addChip('NE555', 0, 0, 0, { freq: 1000 });   // 1kHz → 半周期 500µs
+  check('引脚表为真实 DIP-8 子集', LIB['NE555'].pins.map(p => p.num).join(',') === '2,3,4,7,6');
+  check('上电先输出低半周期', V(sim, t5, 3) === 0, V(sim, t5, 3));
+  let last = V(sim, t5, 3), risers = 0;
+  const t0 = sim.simTime;
+  for (let t = t0; t <= t0 + 10000; t += 100) {
+    sim.processQueue(t);
+    const v = V(sim, t5, 3);
+    if (last === 0 && v === 1) risers++;
+    last = v;
+  }
+  check('1kHz → 10ms 内 10 个上升沿', risers === 10, risers);
+  check('DISCH 在 OUT 低电平期导通 (0)', V(sim, t5, 7) === 0, V(sim, t5, 7));
+
+  // ~RST (4脚, 低有效) 门控
+  const sw = sim.addChip('SW', 0, 0, 0, {}, { on: 1 });
+  sim.addWire(sw, 1, t5, 4);
+  sim.driveNow(sw, 1, 0);
+  check('~RST 低 → OUT 复位为 0', V(sim, t5, 3) === 0);
+  const tHold = sim.simTime;
+  sim.advance(5000);
+  check('~RST 低期间停振', V(sim, t5, 3) === 0 && sim.simTime === tHold, sim.simTime);
+  sim.driveNow(sw, 1, 1);
+  const tR = sim.simTime;
+  sim.advance(5000);
+  check('~RST 释放恢复振荡', sim.simTime - tR >= 4999, sim.simTime - tR);
+
+  // 供电检查
+  t5.powered = false;
+  sim.reevalAll();
+  check('未上电 → OUT 为 X', V(sim, t5, 3) === VX, V(sim, t5, 3));
+  t5.powered = true;
+  sim.reevalAll();
+  const tP = sim.simTime;
+  sim.advance(5000);
+  check('重新上电恢复振荡', sim.simTime - tP >= 4999, sim.simTime - tP);
+}
+
+console.log('\n[17] 4×4 矩阵键盘 (行列扫描)');
+{
+  const sim = makeSim();
+  const kb = sim.addChip('KB44', 0, 0);
+  const R = r => V(sim, kb, 5 + r);               // 行脚 R1..R4
+  // 列脚 C1..C4 经开关驱动 (主机扫描), 断开开关 = 列未驱动
+  const sws = [0, 1, 2, 3].map(() => addSwitch(sim));
+  const cw = [0, 1, 2, 3].map(c => sim.addWire(sws[c], 1, kb, 1 + c));
+  const setC = (c, v) => sim.driveNow(sws[c], 1, v);
+  check('无按键: 行脚 = 下拉电平 0', [0, 1, 2, 3].every(r => R(r) === 0), [0, 1, 2, 3].map(R));
+
+  // 按下 键(行1,列0) ('4' 键), 列1 驱动 1 (列高有效扫描)
+  setC(0, 1);
+  kb.state.keys['1,0'] = 1;
+  sim.evalChip(kb); sim.flush();
+  check('列1=1 且按下(行1,列1): 行1=1 其余=0', R(1) === 1 && R(0) === 0 && R(2) === 0 && R(3) === 0,
+    [0, 1, 2, 3].map(R));
+  setC(0, 0);                                     // 扫描到别的列
+  check('扫描列0=0: 行1 回 0', R(1) === 0, R(1));
+
+  // 同一行两个键分别在不同列被按下, 两列均为 1 → 行 1
+  setC(0, 1);
+  kb.state.keys['1,1'] = 1;
+  sim.evalChip(kb); sim.flush();
+  check('两键在两列且均为 1: 行1=1', R(1) === 1, R(1));
+
+  // 列未驱动 (断开开关) + 按键按下 → 行 X
+  sim.removeWire(cw[0].id);
+  sim.removeWire(cw[1].id);
+  sim.evalChip(kb); sim.flush();
+  check('按下的列未驱动 → 行输出 X', R(1) === VX, R(1));
+
+  // 上拉模式: 空闲 1, 列低有效扫描 (按下且列 0 → 行 0)
+  const kb2 = sim.addChip('KB44', 0, 0, 0, { pull: 1 });
+  const R2 = r => V(sim, kb2, 5 + r);
+  const lo = sim.addChip('GND', 0, 0);
+  sim.addWire(lo, 1, kb2, 1);                     // C1 接低
+  check('上拉: 空闲行 = 1', [0, 1, 2, 3].every(r => R2(r) === 1), [0, 1, 2, 3].map(R2));
+  kb2.state.keys['2,0'] = 1;                      // 按下 键(行2,列1)
+  sim.evalChip(kb2); sim.flush();
+  check('上拉+列低有效: 按下行 = 0 其余 = 1', R2(2) === 0 && R2(0) === 1 && R2(1) === 1 && R2(3) === 1,
+    [0, 1, 2, 3].map(R2));
+
+  // 瞬时性: 载入不恢复按住状态
+  const snap = JSON.parse(JSON.stringify({ s: kb2.state }));
+  const sim2 = makeSim();
+  const kb3 = sim2.addChip('KB44', 0, 0, 0, { pull: 1 }, snap.s);
+  check('载入后按住状态清空', Object.keys(kb3.state.keys || {}).length === 0, kb3.state.keys);
+}
+
 console.log('\n========================================');
 console.log(`结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

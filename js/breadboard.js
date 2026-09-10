@@ -6,8 +6,8 @@
  *   主区: 行 a b c d e | 沟道 | f g h i j   (每列每半区 5 孔连通)
  *   底部电源轨: R3(蓝 -), R4(红 +)
  * DIP 芯片横跨沟道: 引脚 1..n/2 在 e 行自左向右, 引脚 n/2+1..n 在 f 行自右向左
- * 供电模型: DIP 电源脚 (GND=物理中间脚 / VCC=物理最大脚) 所在列需跳线接通电源轨,
- *   未上电芯片由引擎强制输出 X; 电源轨视为已接通台式电源
+ * 供电模型: DIP 电源脚 (默认 GND=物理中间脚 / VCC=物理最大脚, lib.pwr 可按真实引脚覆盖)
+ *   所在列需跳线接通电源轨, 未上电芯片由引擎强制输出 X; 电源轨视为已接通台式电源
  * ========================================================================= */
 (function (global) {
 'use strict';
@@ -301,10 +301,13 @@ function deriveWires(sim, jumpers) {
 }
 
 /* ---------- 供电检查 ---------- */
-/** 电源腿孔位: DIP = 物理电源脚 (GND=中间脚/VCC=最大脚), 有源虚拟元件 = 行两端隐式腿; 其余 null */
+/** 电源腿孔位: DIP = 物理电源脚 (默认 GND=中间脚/VCC=最大脚, lib.pwr 可覆盖如 NE555 的 1/8),
+ *  有源虚拟元件 = 行两端隐式腿; 其余返回 null */
 function powerHoles(ch) {
   if (!ch.bb) return null;
   if (ch.bb.kind === 'dip') {
+    const d = LIBREF()[ch.type];
+    if (d && d.pwr) return { gnd: pinHole(ch, d.pwr.gnd), vcc: pinHole(ch, d.pwr.vcc) };
     const phys = physPins(ch);
     return { gnd: pinHole(ch, phys / 2), vcc: pinHole(ch, phys) };
   }

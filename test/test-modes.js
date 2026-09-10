@@ -427,6 +427,16 @@ console.log('\n[11] 供电: 电源脚孔位 / 自动供电跳线 / 供电判定'
   const rK = BB.autoWire(sim, []);
   check('PS2 上电 (供电跳线生成)', BB.chipPowered(BB.computeNets(sim, rK.jumpers), kb) === true);
 
+  // NE555: 真实 DIP-8 电源脚位 (1脚GND / 8脚VCC, lib.pwr 覆盖默认约定)
+  const n5 = sim.addChip('NE555', 0, 0);
+  n5.bb = { kind: 'dip', board: 0, col: 50 };
+  check('NE555 DIP 跨 4 列', BB.dipSpan(n5) === 4);
+  const ph5 = BB.powerHoles(n5);
+  check('NE555 电源孔: VCC=f50, GND=e50 (真实引脚)', ph5.vcc === '0:f50' && ph5.gnd === '0:e50', ph5);
+  const r5 = BB.autoWire(sim, []);
+  const info5 = BB.computeNets(sim, r5.jumpers);
+  check('NE555 供电跳线 → 上电', BB.chipPowered(info5, n5) === true);
+
   // 网表等价性不受供电跳线影响 (电源网络无引脚, 不派生导线)
   const b = EXAMPLES[2].build();
   const sim2 = new Engine(LIB);
@@ -486,6 +496,51 @@ console.log('\n[9] LCD1602 液晶 (HD44780 接口 + 中文字库)');
   // 光标随写入推进, 内容随存档序列化
   const saved = JSON.parse(JSON.stringify(lcd.state));
   check('LCD1602 显示内容随存档保存', saved.ddram[0] === ' ' && saved.ddram[0x40] === 'A' && saved.ddram.length === 80);
+}
+
+console.log('\n[10] LCD12864 图形液晶 (ST7920: 文字层 + 图形层)');
+{
+  const sim = new Engine(LIB);
+  const lcd = sim.addChip('LCD12864', 0, 0);
+  const rs = sim.addChip('SW', 0, 0), en = sim.addChip('SW', 0, 0);
+  sim.addWire(rs, 1, lcd, 1);
+  sim.addWire(en, 1, lcd, 2);
+  const db = [];
+  for (let i = 0; i < 8; i++) {
+    const s2 = sim.addChip('SW', 0, 0);
+    db.push(s2);
+    sim.addWire(s2, 1, lcd, 3 + i);
+  }
+  const setByte = v => { for (let i = 0; i < 8; i++) sim.driveNow(db[i], 1, (v >> i) & 1); };
+  const strobe = () => { sim.driveNow(en, 1, 1); sim.driveNow(en, 1, 0); };
+  const cmd = b => { sim.driveNow(rs, 1, 0); setByte(b); strobe(); };
+  const dat = b => { sim.driveNow(rs, 1, 1); setByte(b); strobe(); };
+
+  cmd(0x01);                        // 清屏 (文字 + 图形)
+  check('12864 清屏: DDRAM 全空格', lcd.state.ddram.every(c => c === ' '));
+  check('12864 清屏: GDRAM 全零', lcd.state.gdram.every(b2 => b2 === 0));
+
+  cmd(0x80);                        // 文字地址 0 (第 1 行行首)
+  sim.driveNow(rs, 1, 1);
+  dat(0x48); dat(0x69);             // "Hi"
+  check('12864 文字层写入 "Hi"', lcd.state.ddram[0] === 'H' && lcd.state.ddram[1] === 'i');
+
+  cmd(0x36);                        // 扩充指令集 + 开图形
+  cmd(0x80 | 5);                    // GDRAM 行 Y=5
+  cmd(0x80 | 2);                    // 字节列 X=2
+  dat(0xFF);                        // 8 像素全亮
+  check('12864 图形写入 GDRAM[5][2]=0xFF', lcd.state.gdram[5 * 16 + 2] === 0xFF);
+  check('12864 图形写入后列自动 +1 指向 X=3', lcd.state.gx === 3);
+  cmd(0x30);                        // 回基本指令集
+  cmd(0x80 | 2);                    // 文字地址 2
+  sim.driveNow(rs, 1, 1);
+  dat(0x58);                        // 'X'
+  check('12864 基本指令集文字地址 2 写入 X', lcd.state.ddram[2] === 'X');
+
+  // 显示内容随存档序列化
+  const saved = JSON.parse(JSON.stringify(lcd.state));
+  check('12864 文字随存档保存', saved.ddram[2] === 'X');
+  check('12864 图形随存档保存', saved.gdram[5 * 16 + 2] === 0xFF);
 }
 
 console.log(`结果: ${pass} 通过, ${fail} 失败`);

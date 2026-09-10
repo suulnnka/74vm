@@ -489,6 +489,46 @@ def('CLOCK', '时钟源·右键改频率', '输入/输出', [R(1, 'CLK', 'out')]
   init(ch) { ch.state.phase = ch.state.phase || 0; ch.pinByNum[1].driven = ch.state.phase ? 1 : 0; },
 });
 
+/* NE555 定时器 — 真实 DIP-8 封装 (1脚GND / 8脚VCC, 需供电), 无稳态振荡输出时钟。
+ * 数字化抽象: OUT 按 freq 50% 占空比翻转 (~RST 低电平停振并复位),
+ * DISCH 为真实放电管行为 (OUT 低电平期导通=0, 高电平期截止=Z);
+ * TRIG/THRES 在无稳态下由外部 RC 驱动, 数字模型不单独建模。 */
+function ne555Half(ch) {
+  return Math.max(1, Math.round(500000 / (Number(ch.props.freq) || 2)));
+}
+function ne555Tick(ch, e) {
+  const t = ch._ne555;
+  if (!t || !t.on) return;
+  if (ch.powered === false) { t.on = false; return; }
+  t.hi = t.hi ? 0 : 1;
+  e.drive(3, t.hi ? V1 : V0, 0);
+  e.drive(7, t.hi ? VZ : V0, 0);
+  e.schedule(ne555Half(ch), () => ne555Tick(ch, e));
+}
+def('NE555', 'NE555 定时器·时钟(右键改频率)', '输入/输出', [
+  L(2, 'TRIG', 'in'), L(3, 'OUT', 'out'), L(4, '~RST', 'in'),
+  R(7, 'DISCH', 'out'), R(6, 'THRES', 'in'),
+], {
+  pwr: { vcc: 8, gnd: 1 },                  // 真实电源脚位 (非 74 系列约定)
+  defaults: { freq: 2 },
+  eval(ch, e) {
+    const t = ch._ne555 || (ch._ne555 = { on: false, hi: 0 });
+    if (ch.powered === false || e.readLo(4)) {          // 未供电 / ~RST 低: 复位停振
+      t.on = false;
+      e.drive(3, V0, 0);
+      e.drive(7, V0, 0);
+      return;
+    }
+    if (!t.on) {                                        // 启动/恢复振荡: 先输出低半周期
+      t.on = true;
+      t.hi = 0;
+      e.drive(3, V0, 0);
+      e.drive(7, V0, 0);
+      e.schedule(ne555Half(ch), () => ne555Tick(ch, e));
+    }
+  },
+});
+
 def('LED', 'LED 指示灯', '输入/输出', [L(1, 'IN', 'in')], {
   custom: true, hideNums: true, size: { w: 56, h: 56 },
 });
@@ -579,6 +619,42 @@ def('PS2', 'PS/2键盘·点击后打字', '输入/输出', [
     if (!ch.state.queue.length) return;
     ch._ps2 = { active: true, phase: 0, bit: 0, bits: null, byte: 0 };
     ps2Tick(ch, e);
+  },
+});
+
+/* ---------------- 4×4 矩阵键盘 ----------------
+ * 16 个按键按 4×4 排列, 8 个引脚 = 4 列 (C1..C4, 输入, 接主机扫描驱动)
+ * + 4 行 (R1..R4, 输出, 接主机读取)。按键 (行r, 列c) 按下 = 行 r 与列 c 接通。
+ * 行脚由元件驱动 (等效内置下拉/上拉电阻, 仿真无电阻元件):
+ *   该行无按键按下 → 输出 props.pull 电平 (0=下拉·空闲0, 1=上拉·空闲1)
+ *   按下的键所在列 = 1 → 行输出 1; 全为 0 → 0; 列未驱动(X) → 行输出 X
+ * 支持 上拉+列低有效 (经典 74138/74145 扫描) 或 下拉+列高有效 两种极性。
+ * state.keys = { "行,列": 1 } 记录按住中的键 (瞬时器件, 不随存档恢复) */
+def('KB44', '4×4矩阵键盘·按住按键', '输入/输出', [
+  L(1, 'C1', 'in'), L(2, 'C2', 'in'), L(3, 'C3', 'in'), L(4, 'C4', 'in'),
+  R(5, 'R1', 'out'), R(6, 'R2', 'out'), R(7, 'R3', 'out'), R(8, 'R4', 'out'),
+], {
+  custom: true, hideNums: true, size: { w: 168, h: 168 },
+  defaults: { pull: 0 },
+  init(ch) {
+    ch.state.keys = {};
+    const idle = Number(ch.props.pull) ? V1 : V0;
+    for (let i = 0; i < 4; i++) ch.pinByNum[5 + i].driven = idle;
+  },
+  eval(ch, e) {
+    const idle = Number(ch.props.pull) ? V1 : V0;
+    const keys = ch.state.keys || (ch.state.keys = {});
+    for (let r = 0; r < 4; r++) {
+      let has1 = false, hasX = false, pressed = false;
+      for (let c = 0; c < 4; c++) {
+        if (!keys[r + ',' + c]) continue;
+        pressed = true;
+        const cv = e.read(1 + c);
+        if (cv === V1) has1 = true;
+        else if (cv === VX) hasX = true;
+      }
+      e.drive(5 + r, has1 ? V1 : (hasX ? VX : (pressed ? V0 : idle)), 2);
+    }
   },
 });
 
@@ -755,6 +831,100 @@ def('LCD1602', '1602 液晶·内置中文字库', '输入/输出', [
     if (!rising) return;
     if (e.read(1) === V1) lcdPush(ch, lcdDataByte(e));   // RS=1 数据
     else lcdExecCmd(ch, lcdDataByte(e));                 // RS=0 指令
+  },
+});
+
+function lcdPush12864(dd, b, ch) {
+  if (b < 0x80) {
+    dd[ch.state.cur] = String.fromCharCode(b);
+  } else if (ch.state.pending == null) {
+    ch.state.pending = b;
+    return;
+  } else {
+    try {
+      _gb2312 = _gb2312 || new TextDecoder('gb2312');
+      dd[ch.state.cur] = _gb2312.decode(new Uint8Array([ch.state.pending, b]));
+    } catch (err) { dd[ch.state.cur] = '?'; }
+    ch.state.pending = null;
+  }
+  ch.state.cur = (ch.state.cur + 1) % 64;
+}
+
+/* ========================= 12864 图形液晶 (ST7920 风格) =========================
+ * 同 1602 接口 (RS+E+8 位数据, RW 接地), 双层显示:
+ *   文字层 DDRAM 4 行 × 16 半宽字符 (基本指令集 0x30, 地址 0x00~0x3F 线性),
+ *   GB2312 双字节合成汉字 (占 1 格, 仿真简化);
+ *   图形层 GDRAM 128×64 像素 (扩充指令集 0x34/0x36 开图形, 0x80|y 设行、
+ *   0x80|x 设字节列, 每次 1 字节 = 8 像素, 列自动 +1);
+ *   0x01 清空两层, 0x02 文字回 home. 渲染: 图形点阵 + 文字叠加. */
+
+function lcd12864Ensure(ch) {
+  if (!ch.state.ddram || ch.state.ddram.length !== 64) {
+    const dd = new Array(64).fill(' ');
+    const put = (row, str) => { [...str].slice(0, 16).forEach((c, i) => { dd[row * 16 + i] = c; }); };
+    put(0, '12864 图形液晶');
+    put(1, 'ST7920 中文库');
+    ch.state.ddram = dd;
+    ch.state.cur = 0;
+  }
+  if (!ch.state.gdram || ch.state.gdram.length !== 1024) {
+    const g = new Array(1024).fill(0);
+    for (let x = 0; x < 128; x++) { g[x >> 3] |= 0x80 >> (x & 7); g[63 * 16 + (x >> 3)] |= 0x80 >> (x & 7); }
+    for (let y = 0; y < 64; y++) { g[y * 16] |= 0x80; g[y * 16 + 15] |= 0x01; }
+    ch.state.gdram = g;   // 出厂演示: 屏幕四周一圈边框
+  }
+  if (ch.state.ext == null) {
+    ch.state.ext = false; ch.state.gOn = false;
+    ch.state.gStage = 0; ch.state.gy = 0; ch.state.gx = 0;
+    ch.state.cur = 0; ch.state.prevE = 0;
+  }
+}
+
+def('LCD12864', '12864 图形液晶·中文字库', '输入/输出', [
+  L(1, 'RS', 'in'), L(2, 'E', 'in'),
+  R(3, 'D0', 'in'), R(4, 'D1', 'in'), R(5, 'D2', 'in'), R(6, 'D3', 'in'),
+  R(7, 'D4', 'in'), R(8, 'D5', 'in'), R(9, 'D6', 'in'), R(10, 'D7', 'in'),
+], {
+  custom: true, hideNums: true, size: { w: 280, h: 168 },
+  init(ch) { lcd12864Ensure(ch); },
+  eval(ch, e) {
+    lcd12864Ensure(ch);
+    const en = e.read(2);
+    const rising = en === V1 && ch.state.prevE !== V1;
+    ch.state.prevE = en;
+    if (!rising) return;
+    const b = lcdDataByte(e);
+    const dd = ch.state.ddram;
+    if (e.read(1) === V1) {                          // 数据写入
+      if (ch.state.ext && ch.state.gOn) {            // 图形模式: 1 字节 = 8 像素
+        ch.state.gdram[ch.state.gy * 16 + ch.state.gx] = b;
+        ch.state.gx = (ch.state.gx + 1) % 16;
+      } else {
+        lcdPush12864(dd, b, ch);
+      }
+      return;
+    }
+    // 指令
+    if (b === 0x01) {                                // 清屏: 文字 + 图形
+      dd.fill(' ');
+      ch.state.gdram.fill(0);
+      ch.state.cur = 0; ch.state.gStage = 0; ch.state.pending = null;
+    } else if (b === 0x02) {                         // 文字回 home
+      ch.state.cur = 0;
+    } else if (b === 0x30) {                         // 基本指令集
+      ch.state.ext = false;
+    } else if (b === 0x34 || b === 0x36) {           // 扩充指令集 (0x36 同时开图形)
+      ch.state.ext = true;
+      ch.state.gOn = b === 0x36;
+    } else if (b >= 0x80) {                          // 设地址
+      const a = b & 0x7F;
+      if (ch.state.ext) {                            // 图形地址: 先行 Y 后字节列 X
+        if (ch.state.gStage === 0) { ch.state.gy = a & 63; ch.state.gStage = 1; }
+        else { ch.state.gx = a & 15; ch.state.gStage = 0; }
+      } else {
+        ch.state.cur = a < 64 ? a : 0;
+      }
+    }
   },
 });
 

@@ -110,6 +110,53 @@ function chipHalf(ch) {
 
 const snap = v => Math.round(v / 28) * 28;   // 吸附到 28px 主网格
 
+/* ---------- 4×4 矩阵键盘 (KB44) 键位几何与按压 ---------- */
+
+const KB44_CELL = 26, KB44_GAP = 5;              // 键格边长 / 间距 (元件局部坐标)
+const KB44_GLYPH = [['1', '2', '3', 'A'], ['4', '5', '6', 'B'], ['7', '8', '9', 'C'], ['*', '0', '#', 'D']];
+
+/** 键格 (行r, 列c, 0基) 在元件局部坐标系中的矩形 */
+function kb44CellRect(r, c) {
+  const x0 = -(2 * KB44_CELL + 1.5 * KB44_GAP), y0 = -(84 - 26);
+  return { x: x0 + c * (KB44_CELL + KB44_GAP), y: y0 + r * (KB44_CELL + KB44_GAP), w: KB44_CELL, h: KB44_CELL };
+}
+
+/** 世界坐标 → 元件局部坐标 (逆旋转) */
+function chipPointLocal(ch, w) {
+  return rotXY(w.x - ch.x, w.y - ch.y, (360 - (ch.rot || 0)) % 360);
+}
+
+/** 世界坐标下的键格命中, 返回 {r, c} (0基) 或 null */
+function kb44CellAt(ch, w) {
+  const p = chipPointLocal(ch, w);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const q = kb44CellRect(r, c);
+    if (p.x >= q.x && p.x <= q.x + q.w && p.y >= q.y && p.y <= q.y + q.h) return { r, c };
+  }
+  return null;
+}
+
+/** 按下/松开一个键并立即结算 (瞬时动作, 不入撤销栈) */
+function kb44Press(ch, r, c, on) {
+  const keys = ch.state.keys || (ch.state.keys = {});
+  if (on) keys[r + ',' + c] = 1;
+  else delete keys[r + ',' + c];
+  sim.evalChip(ch);
+  sim.flush();
+}
+
+/** 面包板行模块盒内按比例映射键位 (盒窄高小, 按 x/y 比例切 4×4) */
+function kb44CellAtBB(ch, w) {
+  const rect = BB.chipRect(ch);
+  if (!rect || !ch.bb || ch.bb.kind !== 'row') return null;
+  const lower = BB.ROWS_BOT.includes(ch.bb.row);
+  const boxY = lower ? rect.y + 8 : rect.y;      // 与 drawBBChip 的盒定位一致
+  if (w.x < rect.x || w.x > rect.x + rect.w || w.y < boxY || w.y > boxY + 26) return null;
+  const c = Math.max(0, Math.min(3, Math.floor((w.x - rect.x) / rect.w * 4)));
+  const r = Math.max(0, Math.min(3, Math.floor((w.y - boxY) / 26 * 4)));
+  return { r, c };
+}
+
 /* ================= 颜色 ================= */
 
 const COL = {
@@ -555,6 +602,42 @@ function drawIO(ch, def, z) {
       ctx.fillText(focused ? '输入中… Esc 退出' : '点击后打字', 0, half.y - 7);
       break;
     }
+    case 'KB44': {
+      const pull = Number(ch.props.pull);
+      // 顶部: 标题 + 行空闲电平标记
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 11px Consolas, monospace';
+      ctx.fillStyle = '#1f2937'; ctx.textAlign = 'left';
+      ctx.fillText('4×4', -half.x + 10, -half.y + 13);
+      ctx.font = '9px Consolas, monospace';
+      ctx.fillStyle = pull ? '#0277bd' : '#6b7a8c';
+      ctx.textAlign = 'right';
+      ctx.fillText(pull ? '上拉' : '下拉', half.x - 10, -half.y + 13);
+      // 4×4 键格 (按住的键高亮)
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+        const q = kb44CellRect(r, c);
+        const on = !!ch.state.keys[r + ',' + c];
+        if (on) { ctx.shadowColor = '#ff3b3b'; ctx.shadowBlur = 10; }
+        rr(q.x, q.y, q.w, q.h, 4);
+        ctx.fillStyle = on ? '#ffd9d9' : '#e8edf3';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = on ? COL.v1 : '#aebbc9';
+        ctx.lineWidth = on ? 1.5 : 1;
+        ctx.stroke();
+        if (z >= 0.65) {
+          ctx.fillStyle = on ? '#c62828' : '#6b7a8c';
+          ctx.font = '10px Consolas, monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(KB44_GLYPH[r][c], q.x + q.w / 2, q.y + q.h / 2 + 0.5);
+        }
+      }
+      // 底部提示
+      ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = '#6b7a8c'; ctx.textAlign = 'center';
+      ctx.fillText('按住按键接通行列', 0, half.y - 10);
+      break;
+    }
     case 'LCD1602': {
       // 液晶面板: 蓝底白字, 等宽字体渲染 (非点阵)
       const px = -half.x + 10, py = -half.y + 10, pw = w - 20, ph = h - 20;
@@ -587,6 +670,38 @@ function drawIO(ch, def, z) {
         const y = py + 12 + band * row + band / 2 + band / 2 - 5;
         ctx.fillStyle = '#e3f2fd';
         ctx.fillRect(px + cw * ccol + 1, y, cw - 2, 2);
+      }
+      break;
+    }
+    case 'LCD12864': {
+      // 图形液晶: GDRAM 点阵 + DDRAM 文字叠加, 等宽字体
+      const px = -half.x + 10, py = -half.y + 10, pw = w - 20, ph = h - 20;
+      ctx.fillStyle = '#0d47a1';
+      rr(px, py, pw, ph, 4);
+      ctx.fill();
+      ctx.strokeStyle = '#093170';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      const g = ch.state.gdram || [];
+      const dw = pw / 128, dh2 = ph / 64;
+      ctx.fillStyle = '#6ea8e8';
+      for (let yy = 0; yy < 64; yy++) {
+        for (let bx = 0; bx < 16; bx++) {
+          const byte = g[yy * 16 + bx];
+          if (!byte) continue;
+          for (let k = 0; k < 8; k++) {
+            if (byte & (0x80 >> k)) ctx.fillRect(px + (bx * 8 + k) * dw, py + yy * dh2, dw + 0.3, dh2 + 0.3);
+          }
+        }
+      }
+      const cw2 = pw / 16;
+      ctx.font = '13px Consolas, "Microsoft YaHei", monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#e3f2fd';
+      for (let row = 0; row < 4; row++) {
+        let t = '';
+        for (let c = 0; c < 16; c++) t += ch.state.ddram[row * 16 + c] || ' ';
+        if (t.trim()) ctx.fillText(t, px + pw / 2, py + (row + 0.5) * ph / 4);
       }
       break;
     }
@@ -966,6 +1081,18 @@ canvas.addEventListener('pointerdown', e => {
       app.drag = { kind: 'press', ch, start: w, moved: false,
         offs: chips.map(c => ({ c, dx: c.x - w.x, dy: c.y - w.y })) };
       if (ch.type === 'BTN') sim.driveNow(ch, 1, 1); // 按下
+    } else if (ch.type === 'KB44') {
+      const cell = kb44CellAt(ch, w);
+      if (cell) {                                    // 按住键格 = 接通行列
+        app.drag = { kind: 'press', ch, key: cell, start: w, moved: false,
+          offs: chips.map(c => ({ c, dx: c.x - w.x, dy: c.y - w.y })) };
+        pushUndoLite();
+        kb44Press(ch, cell.r, cell.c, true);
+      } else {                                       // 键格以外 = 拖动元件
+        if (app.kbChip) setKbFocus(null);
+        app.drag = { kind: 'move', start: w, moved: false,
+          offs: chips.map(c => ({ c, dx: c.x - w.x, dy: c.y - w.y })) };
+      }
     } else {
       if (app.kbChip) setKbFocus(null);
       app.drag = { kind: 'move', start: w, moved: false,
@@ -1015,6 +1142,11 @@ canvas.addEventListener('pointermove', e => {
     if (app.drag.kind === 'press' && dist > 6 && !app.drag.moved) {
       // 拖动意图: 撤销按键按下
       if (app.drag.ch.type === 'BTN') sim.driveNow(app.drag.ch, 1, 0);
+      else if (app.drag.ch.type === 'KB44' && app.drag.key) {
+        const k = app.drag.key;                  // 拖动 = 取消按压, 转为移动
+        kb44Press(app.drag.ch, k.r, k.c, false);
+        app.drag.key = null;
+      }
       app.drag.moved = true;
     }
     if (app.drag.kind === 'move' && dist > 3) {
@@ -1055,7 +1187,7 @@ function updateHover(w) {
   const ch = chipAt(w);
   if (ch) {
     app.hover = { kind: 'chip', id: ch.id };
-    canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2') ? CURSORS.pointer : CURSORS.grab;
+    canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2' || ch.type === 'KB44') ? CURSORS.pointer : CURSORS.grab;
     return;
   }
   const wI = wireAt(w);
@@ -1110,6 +1242,9 @@ canvas.addEventListener('pointerup', e => {
         sim.driveNow(ch, 1, 0);
       } else if (ch.type === 'PS2') {
         setKbFocus(app.kbChip === ch ? null : ch);   // 单击切换打字聚焦
+      } else if (ch.type === 'KB44' && app.drag.key) {
+        const k = app.drag.key;                      // 松开 = 断开行列
+        kb44Press(ch, k.r, k.c, false);
       }
     } else if (app.drag.kind === 'move' && app.drag.moved) {
       sim.touch();
@@ -1204,6 +1339,7 @@ canvas.addEventListener('contextmenu', e => {
     if (ch.type === 'CLOCK') items.push({ text: '编辑频率…', fn: () => editLabelOrFreq(ch) });
     items.push({ text: '编辑标签…', fn: () => editLabel(ch) });
     if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? '退出打字 (Esc)' : '聚焦打字…', fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
+    if (ch.type === 'KB44') items.push({ text: '行脚空闲电平: ' + (Number(ch.props.pull) ? '上拉 1' : '下拉 0') + ' (点击切换)', fn: () => { ch.props.pull = Number(ch.props.pull) ? 0 : 1; sim.evalChip(ch); sim.flush(); sim.touch(); scheduleSave(); } });
     items.push(...memoryMenuItems(ch));
     items.push({ text: '复制 (Ctrl+D)', fn: () => duplicateSelection() });
     items.push({ text: '删除 (Del)', fn: () => deleteChip(ch) });
@@ -2317,6 +2453,16 @@ function bbPointerDown(e) {
     if (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2') {
       app.drag = { kind: 'bbPress', ch, start: w, moved: false };
       if (ch.type === 'BTN') sim.driveNow(ch, 1, 1);
+    } else if (ch.type === 'KB44') {
+      const cell = kb44CellAtBB(ch, w);
+      if (cell) {                                  // 盒内按住键位 = 接通行列
+        app.drag = { kind: 'bbPress', ch, key: cell, start: w, moved: false };
+        pushUndoLite();
+        kb44Press(ch, cell.r, cell.c, true);
+      } else {
+        if (app.kbChip) setKbFocus(null);
+        app.drag = { kind: 'bbMove', ch, start: w, moved: false };
+      }
     } else {
       if (app.kbChip) setKbFocus(null);
       app.drag = { kind: 'bbMove', ch, start: w, moved: false };
@@ -2363,6 +2509,11 @@ function bbPointerMove(e) {
     }
     if (app.drag.moved) {
       if (app.drag.kind === 'bbPress' && app.drag.ch.type === 'BTN') sim.driveNow(app.drag.ch, 1, 0);
+      if (app.drag.kind === 'bbPress' && app.drag.ch.type === 'KB44' && app.drag.key) {
+        const k = app.drag.key;                    // 拖动 = 取消按压, 转为移动
+        kb44Press(app.drag.ch, k.r, k.c, false);
+        app.drag.key = null;
+      }
       bbSetPos(app.drag.ch, w);
       canvas.style.cursor = CURSORS.grabbig;
     }
@@ -2370,7 +2521,7 @@ function bbPointerMove(e) {
   }
   // 悬停提示
   const ch = bbChipAt(w);
-  if (ch) { app.hover = { kind: 'chip', id: ch.id }; canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2') ? CURSORS.pointer : CURSORS.grab; hideTooltip(); return; }
+  if (ch) { app.hover = { kind: 'chip', id: ch.id }; canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2' || ch.type === 'KB44') ? CURSORS.pointer : CURSORS.grab; hideTooltip(); return; }
   const h = bbHoleAt(w);
   if (h) {
     app.hover = { kind: 'bbHole', hole: h };
@@ -2424,6 +2575,9 @@ function bbPointerUp(e) {
       if (ch.type === 'SW') { ch.state.on = ch.state.on ? 0 : 1; sim.driveNow(ch, 1, ch.state.on); }
       else if (ch.type === 'BTN') sim.driveNow(ch, 1, 0);
       else if (ch.type === 'PS2') setKbFocus(app.kbChip === ch ? null : ch);
+      else if (ch.type === 'KB44' && d.key) {
+        kb44Press(ch, d.key.r, d.key.c, false);    // 松开 = 断开行列
+      }
     } else if (d.moved) {
       sim.touch(); scheduleSave();
     }
@@ -2445,6 +2599,7 @@ function bbContextMenu(e) {
       items.push({ text: '编辑标签…', fn: () => editLabelOrFreq(ch) });
     }
     if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? '退出打字 (Esc)' : '聚焦打字…', fn: () => setKbFocus(app.kbChip === ch ? null : ch) });
+    if (ch.type === 'KB44') items.push({ text: '行脚空闲电平: ' + (Number(ch.props.pull) ? '上拉 1' : '下拉 0') + ' (点击切换)', fn: () => { ch.props.pull = Number(ch.props.pull) ? 0 : 1; sim.evalChip(ch); sim.flush(); sim.touch(); scheduleSave(); } });
     items.push(...memoryMenuItems(ch));
     items.push({ text: '移出面包板 (Del)', fn: () => bbUnplace(ch) });
     items.push({ text: '彻底删除元件', fn: () => deleteChip(ch) });
@@ -2602,8 +2757,43 @@ function clearLcd(ch) {
   scheduleSave();
   toast('已清屏');
 }
+/** LCD12864: 编辑显示文本 / 清屏 / 清除图形 */
+function editLcd12864Text(ch) {
+  const dd = ch.state.ddram;
+  const lines = [0, 1, 2, 3].map(r => dd.slice(r * 16, r * 16 + 16).join('').replace(/\s+$/, ''));
+  Dialog.prompt({
+    title: '12864 显示文本 — ' + memChipName(ch),
+    label: '共 4 行, 每行最多 16 个字符 (支持中文):',
+    value: lines.join('\n'),
+    multiline: true, rows: 7,
+    okText: '显示',
+    validate: s => {
+      const ls = s.split('\n');
+      if (ls.length > 4) return '最多 4 行';
+      if (ls.some(l => [...l].length > 16)) return '每行最多 16 个字符';
+      return null;
+    },
+  }).then(s => {
+    if (s == null) return;
+    pushUndo();
+    dd.fill(' ');
+    s.split('\n').slice(0, 4).forEach((l, r) => { [...l].slice(0, 16).forEach((c, i) => { dd[r * 16 + i] = c; }); });
+    scheduleSave();
+    toast('显示文本已更新');
+  });
+}
+function clearLcd12864Gfx(ch) {
+  ch.state.gdram.fill(0);
+  scheduleSave();
+  toast('图形层已清除');
+}
 /** 右键菜单追加项: 存储器 (按 mem 配置识别) 与 LCD1602 */
 function memoryMenuItems(ch) {
+  if (ch.type === 'LCD12864') return [
+    { text: '编辑显示文本…', fn: () => editLcd12864Text(ch) },
+    { text: '清屏', fn: () => { pushUndo(); ch.state.ddram.fill(' '); ch.state.gdram.fill(0); sim.touch(); sim.reevalAll(); scheduleSave(); toast('已清屏'); } },
+    { text: '清除图形', fn: () => clearLcd12864Gfx(ch) },
+  ];
   if (ch.type === 'LCD1602') return [
     { text: '编辑显示文本…', fn: () => editLcdText(ch) },
     { text: '清屏', fn: () => clearLcd(ch) },
@@ -2621,10 +2811,11 @@ function memoryMenuItems(ch) {
 }
 
 function editLabelOrFreq(ch) {
-  if (ch.type === 'CLOCK') {
+  if (ch.type === 'CLOCK' || ch.type === 'NE555') {
+    const is555 = ch.type === 'NE555';
     Dialog.prompt({
-      title: '时钟频率 — CLOCK',
-      label: '时钟频率 (Hz, 0.1 ~ 20000):',
+      title: is555 ? '振荡频率 — NE555 (由 R/C 决定)' : '时钟频率 — CLOCK',
+      label: '频率 (Hz, 0.1 ~ 20000):',
       value: String(ch.props.freq || 2),
       validate: s => {
         const f = parseFloat(s);
@@ -2634,9 +2825,9 @@ function editLabelOrFreq(ch) {
       if (s == null) return;
       const f = parseFloat(s);
       ch.props.freq = f;
-      ch.state.nextT = sim.simTime + sim.clockHalf(ch);
+      if (!is555) ch.state.nextT = sim.simTime + sim.clockHalf(ch);
       sim.touch(); scheduleSave();
-      toast('时钟已设为 ' + f + ' Hz');
+      toast((is555 ? 'NE555 振荡频率已设为 ' : '时钟已设为 ') + f + ' Hz');
     });
   } else {
     editLabel(ch);
@@ -3007,6 +3198,27 @@ function drawIOGlyph(ch, cx, cy) {
       ctx.fillText(v === 'Z' ? 'Z' : String(v), cx, cy);
       break;
     }
+    case 'LCD12864': {
+      // 迷你图形屏: 蓝底 + 两层内容示意
+      ctx.fillStyle = '#0d47a1';
+      rr(cx - 12, cy - 10, 24, 20, 2); ctx.fill();
+      ctx.font = '5px Consolas, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#9fc9f5';
+      const dd = ch.state.ddram || [];
+      for (let row = 0; row < 4; row++) {
+        let t = '';
+        for (let c = 0; c < 16; c++) t += dd[row * 16 + c] || ' ';
+        ctx.fillText(t.slice(0, 14), cx - 11, cy - 6 + row * 4.4);
+      }
+      ctx.fillStyle = '#6ea8e8';
+      const g = ch.state.gdram || [];
+      for (let k = 0; k < 16; k++) {          // 顶/底边框点示意
+        if (g[k] & 0x80) ctx.fillRect(cx - 11 + k * 1.5, cy - 9.5, 1.5, 1);
+        if (g[1008 + k] & 0x80) ctx.fillRect(cx - 11 + k * 1.5, cy + 8.5, 1.5, 1);
+      }
+      break;
+    }
     case 'PS2': {
       // 迷你键盘 (发送中描边变绿)
       const on = !!(ch._ps2 && ch._ps2.active);
@@ -3016,6 +3228,16 @@ function drawIOGlyph(ch, cx, cy) {
       ctx.fillStyle = '#8a97a5';
       for (let r2 = 0; r2 < 3; r2++) for (let c = 0; c < 5; c++)
         ctx.fillRect(cx - 6.5 + c * 2.8, cy - 3.5 + r2 * 2.8, 2, 2);
+      break;
+    }
+    case 'KB44': {
+      // 迷你 4×4 键阵 (按住的键亮绿)
+      const keys = ch.state.keys || {};
+      for (let r2 = 0; r2 < 4; r2++) for (let c = 0; c < 4; c++) {
+        const on = !!keys[r2 + ',' + c];
+        ctx.fillStyle = on ? COL.v1 : (r2 + c) % 2 ? '#46545f' : '#3a454f';
+        ctx.fillRect(cx - 7 + c * 4, cy - 7 + r2 * 4, 3, 3);
+      }
       break;
     }
     default:
