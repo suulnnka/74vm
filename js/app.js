@@ -2403,25 +2403,41 @@ function drawBBChip(ch, z) {
   const hov = app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id;
 
   if (ch.bb.kind === 'dip') {
+    // 机体居中于 e/f 两排之间 (rect.y+16 .. +46), 不覆盖孔位; 腿连到孔
+    const bx = rect.x + 3, bw = rect.w - 6;
+    const bodyTop = rect.y + 20, bodyBot = rect.y + rect.h - 4;
+    const cy = (bodyTop + bodyBot) / 2;
+    ctx.strokeStyle = '#8ba0b6';
+    ctx.lineWidth = 1.4;
+    for (const p of ch.pins) {
+      const hp = B.holePos(B.pinHole(ch, p.num));
+      if (!hp) continue;
+      ctx.beginPath();
+      ctx.moveTo(hp.x, hp.row === 'e' ? bodyTop : bodyBot);
+      ctx.lineTo(hp.x, hp.y);
+      ctx.stroke();
+    }
     ctx.fillStyle = '#2b3138';
-    rr(rect.x, rect.y, rect.w, rect.h, 5);
+    rr(bx, bodyTop, bw, bodyBot - bodyTop, 5);
     ctx.fill();
     ctx.strokeStyle = sel ? COL.sel : (hov ? '#7c8b9c' : '#454e59');
     ctx.lineWidth = sel ? 1.8 : 1.2;
     ctx.stroke();
     // 1脚缺口 (左端半圆)
     ctx.beginPath();
-    ctx.arc(rect.x + 1, B.CHANNEL_Y, 6, -Math.PI / 2, Math.PI / 2);
+    ctx.arc(bx + 1, cy, 5, -Math.PI / 2, Math.PI / 2);
     ctx.fillStyle = '#d9d3bd';
     ctx.fill();
     ctx.fillStyle = '#e6eef8';
-    ctx.font = 'bold 12px Consolas, monospace';
+    ctx.font = 'bold 11px Consolas, monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(def.type, rect.x + rect.w / 2, B.CHANNEL_Y - 8);
-    ctx.fillStyle = '#8ba0b6';
-    ctx.font = '8.5px "Segoe UI","Microsoft YaHei",sans-serif';
-    ctx.fillText(def.desc, rect.x + rect.w / 2, B.CHANNEL_Y + 8);
-    // 引脚号
+    ctx.fillText(def.type, bx + bw / 2, cy - 6);
+    if (bw > 70) {
+      ctx.fillStyle = '#8ba0b6';
+      ctx.font = '7.5px "Segoe UI","Microsoft YaHei",sans-serif';
+      ctx.fillText(def.desc, bx + bw / 2, cy + 8);
+    }
+    // 引脚号 (孔外侧, 不与机体重叠)
     if (z >= 0.8) {
       ctx.font = '6.5px Consolas, monospace';
       ctx.fillStyle = '#6d7885';
