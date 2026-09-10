@@ -157,7 +157,8 @@ function chipRect(ch) {
     const span = dipSpan(ch);
     const p = holePos((bb.board || 0) + ':e' + bb.col);
     if (!p) return null;
-    return { x: colX(bb.col) - PITCH / 2, y: oy + CHANNEL_Y - 25, w: span * PITCH, h: 50 };
+    // 机体上下加宽: 盖住 e/f 两排 (各超出 8px), 引脚号可印入机体
+    return { x: colX(bb.col) - PITCH / 2, y: oy + ROW_Y.e - 8, w: span * PITCH, h: ROW_Y.f - ROW_Y.e + 16 };
   }
   if (bb.kind === 'row') {
     const n = Math.max(1, ch.pins.length);

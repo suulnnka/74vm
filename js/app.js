@@ -2347,9 +2347,9 @@ function drawBreadboard(z) {
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.fillText('BOARD ' + (b + 1), B.BOARD.x + 6, oy + B.BOARD.y + 3);
     }
-    // 中央沟道
+    // 中央沟道 (加宽: DIP 机体上下加宽后仍嵌入槽位)
     ctx.fillStyle = '#c4bda2';
-    rr(B.colX(1) - 10, oy + B.CHANNEL_Y - 7, B.colX(cols) - B.colX(1) + 20, 14, 4);
+    rr(B.colX(1) - 10, oy + B.CHANNEL_Y - 14, B.colX(cols) - B.colX(1) + 20, 28, 8);
     ctx.fill();
     // 电源轨
     ctx.font = 'bold 11px Consolas, monospace';
@@ -2479,50 +2479,37 @@ function drawBBChip(ch, z) {
   const hov = app.hover && app.hover.kind === 'chip' && app.hover.id === ch.id;
 
   if (ch.bb.kind === 'dip') {
-    // 机体居中于 e/f 两排之间 (rect.y+16 .. +46), 不覆盖孔位; 腿连到孔
-    const bx = rect.x + 3, bw = rect.w - 6;
-    const bodyTop = rect.y + 20, bodyBot = rect.y + rect.h - 4;
-    const cy = (bodyTop + bodyBot) / 2;
-    ctx.strokeStyle = '#8ba0b6';
-    ctx.lineWidth = 1.4;
-    for (const p of ch.pins) {
-      const hp = B.holePos(B.pinHole(ch, p.num));
-      if (!hp) continue;
-      ctx.beginPath();
-      ctx.moveTo(hp.x, hp.row === 'e' ? bodyTop : bodyBot);
-      ctx.lineTo(hp.x, hp.y);
-      ctx.stroke();
-    }
+    // 机体盖住 e/f 两排, 引脚号印在机体内部 (贴近对应孔位一侧)
     ctx.fillStyle = '#2b3138';
-    rr(bx, bodyTop, bw, bodyBot - bodyTop, 5);
+    rr(rect.x, rect.y, rect.w, rect.h, 5);
     ctx.fill();
     ctx.strokeStyle = sel ? COL.sel : (hov ? '#7c8b9c' : '#454e59');
     ctx.lineWidth = sel ? 1.8 : 1.2;
     ctx.stroke();
     // 1脚缺口 (左端半圆)
     ctx.beginPath();
-    ctx.arc(bx + 1, cy, 5, -Math.PI / 2, Math.PI / 2);
+    ctx.arc(rect.x + 1, rect.y + rect.h / 2, 6, -Math.PI / 2, Math.PI / 2);
     ctx.fillStyle = '#d9d3bd';
     ctx.fill();
     ctx.fillStyle = '#e6eef8';
     ctx.font = 'bold 11px Consolas, monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(def.type, bx + bw / 2, cy - 6);
-    if (bw > 70) {
+    ctx.fillText(def.type, rect.x + rect.w / 2, rect.y + 19);
+    if (rect.w > 70) {
       ctx.fillStyle = '#8ba0b6';
       ctx.font = '7.5px "Segoe UI","Microsoft YaHei",sans-serif';
-      ctx.fillText(def.desc, bx + bw / 2, cy + 8);
+      ctx.fillText(def.desc, rect.x + rect.w / 2, rect.y + 33);
     }
-    // 引脚号 (孔外侧, 不与机体重叠)
+    // 引脚号 (印入机体, 贴近各自孔位一侧)
     if (z >= 0.8) {
-      ctx.font = '6.5px Consolas, monospace';
-      ctx.fillStyle = '#6d7885';
+      ctx.font = '7px Consolas, monospace';
+      ctx.fillStyle = '#9fb2c5';
       for (const p of ch.pins) {
         const h = B.pinHole(ch, p.num);
         if (!h) continue;
         const hp = B.holePos(h);
         if (!hp) continue;
-        ctx.fillText(String(p.num), hp.x, hp.row === 'e' ? hp.y - 8 : hp.y + 8);
+        ctx.fillText(String(p.num), hp.x, hp.row === 'e' ? rect.y + 7 : rect.y + rect.h - 7);
       }
     }
   } else if (ch.bb.kind === 'row') {
