@@ -248,6 +248,63 @@ console.log('\n[13] 供电检查: 未上电芯片输出 X');
   check('重新上电恢复 NAND(1,1) = 0', V(sim, n, 3) === 0, V(sim, n, 3));
 }
 
+console.log('\n[14] PS/2 键盘帧格式 (Set 2, 11 位帧)');
+{
+  const sim = makeSim();
+  const kb = sim.addChip('PS2', 0, 0);
+  check('空闲: CLK=DATA=1', V(sim, kb, 1) === 1 && V(sim, kb, 2) === 1, [V(sim, kb, 1), V(sim, kb, 2)]);
+  kb.state.queue.push(0x1C);            // 'A' 的 Set 2 Make 码
+  sim.evalChip(kb);
+  // 以 15µs 步进推进, 在 CLK 下降沿采样 DATA → 解码一帧
+  let lastClk = 1;
+  const bits = [];
+  for (let t = 0; t <= 2000; t += 15) {
+    sim.processQueue(t);
+    const clk = V(sim, kb, 1);
+    if (lastClk === 1 && clk === 0) bits.push(V(sim, kb, 2));
+    lastClk = clk;
+  }
+  check('一帧共 11 位', bits.length === 11, bits);
+  check('起始位 0 / 停止位 1', bits[0] === 0 && bits[10] === 1, bits);
+  const byte = bits.slice(1, 9).reduce((a2, b2, i) => a2 | (b2 << i), 0);
+  check('数据位 LSB 在前 = 0x1C', byte === 0x1C, '0x' + byte.toString(16));
+  const ones = bits.slice(1, 9).filter(x => x === 1).length;
+  check('奇校验位正确', (ones + bits[9]) % 2 === 1, [ones, bits[9]]);
+  check('发完回空闲', V(sim, kb, 1) === 1 && V(sim, kb, 2) === 1);
+  check('lastByte 记录最后发送字节', kb.state.lastByte === 0x1C, kb.state.lastByte);
+}
+
+console.log('\n[15] PS/2 → 74164 接收 + 多字节队列');
+{
+  const sim = makeSim();
+  const kb = sim.addChip('PS2', 0, 0);
+  const sr = sim.addChip('74164', 0, 0);
+  sim.addWire(kb, 1, sr, 8);            // CLK → CK (上升沿移位)
+  sim.addWire(kb, 2, sr, 1);            // DATA → A&B
+  sim.addWire(kb, 2, sr, 2);
+  kb.state.queue.push(0x1C);            // 'A'
+  sim.evalChip(kb);
+  sim.flush();                          // 定时器链全部执行完
+  // 11 个上升沿移位后寄存器 = 帧尾 8 位: d2..d7 + 校验 + 停止
+  // 0x1C: d=00011100, 奇校验=0, 停止=1 → 1110 0001 = 0xE1
+  const q = [3, 4, 5, 6, 9, 10, 11, 12].map(p => V(sim, sr, p));
+  const reg = q.reduce((a2, b2, i) => a2 | ((b2 === 1 ? 1 : 0) << i), 0);
+  check('74164 收到帧尾 8 位 = 0xE1', reg === 0xE1, '0x' + reg.toString(16));
+  // 连续两字节 Break 'A' = F0 1C → 共 22 个 CLK 下降沿
+  const t0 = sim.simTime;
+  kb.state.queue.push(0xF0, 0x1C);
+  sim.evalChip(kb);
+  let lastClk = 1, edges = 0;
+  for (let t = t0; t <= t0 + 3000; t += 15) {
+    sim.processQueue(t);
+    const clk = V(sim, kb, 1);
+    if (lastClk === 1 && clk === 0) edges++;
+    lastClk = clk;
+  }
+  check('两帧共 22 个时钟脉冲', edges === 22, edges);
+  check('队列清空并回空闲', kb.state.queue.length === 0 && V(sim, kb, 1) === 1 && V(sim, kb, 2) === 1);
+}
+
 console.log('\n========================================');
 console.log(`结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);
