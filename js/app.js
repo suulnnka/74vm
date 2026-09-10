@@ -704,7 +704,7 @@ function toast(msg, cls) {
 /* ================= 撤销 / 重做 ================= */
 
 function pushUndo() {
-  app.undoStack.push(JSON.stringify(buildSave()));
+  app.undoStack.push(JSON.stringify(buildSave(false)));
   if (app.undoStack.length > 60) app.undoStack.shift();
   app.redoStack.length = 0;
   syncSchematicWires();
@@ -712,21 +712,21 @@ function pushUndo() {
 }
 function undo() {
   if (!app.undoStack.length) { toast('没有可撤销的操作'); return; }
-  app.redoStack.push(JSON.stringify(buildSave()));
+  app.redoStack.push(JSON.stringify(buildSave(false)));
   restoreSave(JSON.parse(app.undoStack.pop()));
   scheduleSave();
 }
 function redo() {
   if (!app.redoStack.length) { toast('没有可重做的操作'); return; }
-  app.undoStack.push(JSON.stringify(buildSave()));
+  app.undoStack.push(JSON.stringify(buildSave(false)));
   restoreSave(JSON.parse(app.redoStack.pop()));
   scheduleSave();
 }
 
 /* ================= 保存快照 (原理图网表 + 面包板/PCB 布局) ================= */
 
-function buildSave() {
-  return {
+function buildSave(withView = true) {
+  const save = {
     v: 2,
     time: Math.round(sim.simTime),
     chips: Array.from(sim.chips.values()).map(c => {
@@ -741,6 +741,9 @@ function buildSave() {
     wires: app.mode === 'breadboard' ? (app.schematicWires || []) : sim.wiresRaw(),
     bb: { jumpers: app.bb.jumpers, placed: app.bb.placed, cols: BB.getCols(), boards: BB.getBoards() },
   };
+  // 视图状态: 当前模式 + 各模式相机 (撤销/重做快照不携带, 避免来回跳视图)
+  if (withView) save.view = { mode: app.mode, cams: JSON.parse(JSON.stringify(app.cams)) };
+  return save;
 }
 
 function restoreSave(data) {
@@ -765,6 +768,18 @@ function restoreSave(data) {
   app.bb.placed = !!(data.bb && data.bb.placed);
   bbSanitize();
   if (app.mode === 'breadboard') applyBB();
+  // 视图状态: 各模式相机 + 上次使用的模式 (旧存档无 view 字段则保持现状)
+  if (data.view && data.view.cams) {
+    for (const k of ['schematic', 'breadboard', 'pcb']) {
+      const c = data.view.cams[k];
+      if (c && [c.x, c.y, c.zoom].every(Number.isFinite)) {
+        app.cams[k] = { x: c.x, y: c.y, zoom: c.zoom, fitted: !!c.fitted };
+      }
+    }
+    if (['schematic', 'breadboard', 'pcb'].includes(data.view.mode) && data.view.mode !== app.mode) {
+      switchMode(data.view.mode);
+    }
+  }
   clearSelection();
 }
 
@@ -1044,6 +1059,7 @@ canvas.addEventListener('wheel', e => {
     app.cam.x -= e.deltaX;
     app.cam.y -= e.deltaY;
   }
+  scheduleSave();   // 相机变化随自动保存持久化 (700ms 防抖)
 }, { passive: false });
 // Safari 触控板捏合会发 gesture 事件: 阻止页面缩放
 ['gesturestart', 'gesturechange', 'gestureend'].forEach(t =>
@@ -1774,6 +1790,7 @@ function switchMode(m) {
     toast('PCB 模式 — 拖动/旋转封装, 📤 导出立创EDA 后可在其内自动布线');
   }
   updateStatus();
+  scheduleSave();   // 记住上次使用的模式
 }
 
 function fitBreadboard() {
@@ -2934,7 +2951,7 @@ syncRun();
   try { data = JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) { /* 忽略 */ }
   if (data && Array.isArray(data.chips) && data.chips.length) {
     restoreSave(data);
-    fitView();
+    if (!(data.view && data.view.cams)) fitView();   // 有保存的视图则不重新适配
     toast('已恢复上次的电路 (文件菜单可新建)');
   } else {
     loadExample(window.EXAMPLES[0]);
