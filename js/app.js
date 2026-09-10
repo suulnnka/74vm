@@ -1634,6 +1634,7 @@ setLibShown(localStorage.getItem('74vm:lib') !== '0');   // 侧栏初始状态
 function loadExample(ex) {
   if (sim.chips.size) pushUndo();
   sim.load({ chips: ex.build().chips, wires: ex.build().wires });
+  for (const ch of sim.chips.values()) { ch.x = snap(ch.x); ch.y = snap(ch.y); }   // 示例坐标吸附 28px 网格
   syncSchematicWires();
   // 重置面包板接线状态 (新电路需要重新摆放/接线)
   app.bb.jumpers = [];
@@ -2840,8 +2841,7 @@ syncRun();
     fitView();
     toast('已恢复上次的电路 (文件菜单可新建)');
   } else {
-    sim.load({ chips: window.EXAMPLES[0].build().chips, wires: window.EXAMPLES[0].build().wires });
-    syncSchematicWires();
+    loadExample(window.EXAMPLES[0]);
     fitView();
     toast('欢迎使用 74VM — 点击左上角 ❓ 查看帮助');
   }
