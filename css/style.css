@@ -43,6 +43,14 @@ select.btn { padding: 4px 6px; }
 .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
 .grow { flex: 1; }
 
+/* GitHub 链接 (顶栏右侧) */
+.gh-link {
+  flex: none; display: flex; align-items: center;
+  padding: 5px; border-radius: 6px;
+  color: var(--text-dim); cursor: pointer;
+}
+.gh-link:hover { color: var(--text); background: var(--btn-hover); }
+
 
 /* 下拉菜单 */
 .dd { position: relative; }

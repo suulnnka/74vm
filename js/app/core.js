@@ -518,9 +518,11 @@ let hdTimer = 0, hdKey = null, hdShown = false, hdLastEvt = null;
 function hdPosition(e) {
   const r = holder.getBoundingClientRect();
   let x = e.clientX - r.left + 14, y = e.clientY - r.top + 16;
+  if (x < 0) x = 8;   // 鼠标在 holder 左侧 (元件库侧栏区): 贴 holder 左缘, 仍按光标高度
+  if (y < 0) y = 8;
   const w = tooltipEl.offsetWidth, h = tooltipEl.offsetHeight;
-  if (x + w > r.width - 8) x = Math.max(8, e.clientX - r.left - w - 12);
-  if (y + h > r.height - 8) y = Math.max(8, e.clientY - r.top - h - 12);
+  if (x + w > r.width - 8) x = Math.max(0, e.clientX - r.left - w - 12);
+  if (y + h > r.height - 8) y = Math.max(0, e.clientY - r.top - h - 12);
   tooltipEl.style.left = x + 'px';
   tooltipEl.style.top = y + 'px';
 }

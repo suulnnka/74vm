@@ -276,6 +276,11 @@ function applyLang() {
   if (search) search.placeholder = t('搜索元件');
   const sideToggle = document.getElementById('sideToggle');
   if (sideToggle) sideToggle.title = t('收起/展开元件库');
+  const ghLink = document.getElementById('ghLink');
+  if (ghLink) {
+    ghLink.title = t('GitHub 项目主页');
+    ghLink.setAttribute('aria-label', t('GitHub 项目主页'));
+  }
   const helpHead = document.querySelector('#helpModal .modal-head b');
   if (helpHead) helpHead.textContent = t('74VM 使用帮助');
   const btnHelpClose = document.getElementById('btnHelpClose');
