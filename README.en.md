@@ -8,7 +8,7 @@ A pure front-end (zero-dependency) simulator for 74-series logic chip circuits, 
 - **🍞 Breadboard mode**: realistic breadboard view (60 columns, rows a–j, top & bottom power rails, 5 tied holes per column), **one-click auto-placement from the schematic with all jumper wires generated** (including power jumpers for every chip), per-hole/per-jumper editing (**at most one jumper per hole; holes occupied by chip pins can't take a jumper** — manual wiring enforces the same), **DIP chips only work once connected to the power rails**, circuit keeps simulating in real time
 - **🟩 PCB mode**: DIP footprint layout + ratsnest preview, **exports a PCB source file that EasyEDA (Standard edition) opens directly** — pads carry net names, so the ratsnest is there on open and you can run EasyEDA's auto-router right away; also exports a generic netlist JSON (for a future in-house router)
 
-![Breadboard mode: 7-segment counter (74161+7448) example, ✨one-click auto-place & jumper routing](docs/screenshot-breadboard.png)
+![Breadboard mode: VM-8 CPU clock computer example (45 chips across three breadboards, 1602 LCD showing the live clock), ✨one-click auto-place & jumper routing](docs/screenshot-breadboard.png)
 
 ## Run
 
