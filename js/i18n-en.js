@@ -366,6 +366,36 @@ window.I18N_EN = {
   'GitHub 项目主页': 'GitHub project page',
   '74VM 使用帮助': '74VM User Guide',
   '✕ 关闭': '✕ Close',
+
+  /* ---- 电源控制 (仿真菜单 开机/关机/重启) ---- */
+  '⏻ 已关机': '⏻ Powered off',
+  '开机': 'Power on',
+  '关机': 'Power off',
+  '重启': 'Restart',
+  '上电冷启动': 'cold start',
+  '全部芯片断电': 'all chips unpowered',
+  '断电再上电, 程序从头执行': 'power cycle, program restarts',
+  '已关机 — 仿真菜单可开机或重启': 'Powered off — use Simulate to power on or restart',
+  '已关机 — 仿真菜单可开机': 'Powered off — use Simulate to power on',
+  '已关机 — 全部芯片断电, 时钟停振 (仿真菜单可开机)': 'Powered off — all chips unpowered, clocks stopped (Simulate → Power on)',
+  '已开机 — 易失状态复位 / RAM 清零 / ROM 保持, 程序从头执行': 'Powered on — volatile state reset, RAM cleared, ROM kept; program restarts from 0',
+  '已重启 — 等效断电再上电, 程序从头执行': 'Restarted — equivalent to a power cycle; program restarts from 0',
+
+  /* ---- VM-8 内置程序库 ---- */
+  '📥 载入 VM-8 程序…': '📥 Load VM-8 program…',
+  '载入 VM-8 程序 — {n}': 'Load VM-8 program — {n}',
+  '选择烧入程序 ROM 的程序, 写入后自动冷启动 (PC=0 从头执行):': 'Pick a program to burn into the program ROM; the machine cold-boots automatically afterwards (PC restarts at 0):',
+  '已烧入「{n}」并冷启动': 'Burned "{n}" and cold-booted',
+  '计数器 (00~59 循环)': 'Counter (00–59 loop)',
+  '最小程序: 轮询 1Hz 秒脉冲, 1602 显示 00~59 循环 (69 字节)': 'Smallest program: polls the 1Hz tick, shows 00–59 on the 1602 (69 bytes)',
+  '迎宾动画 (按任意键重播)': 'Welcome animation (any key replays)',
+  '开机逐字打出「你好 74VM-8!」(GB2312 中文), 按任意键重播 (57 字节)': 'Types "你好 74VM-8!" (GB2312 Chinese) char by char; any key replays it (57 bytes)',
+  '打字机 (数字/空格/回车/Esc)': 'Typewriter (digits/space/enter/Esc)',
+  'PS/2 数字键 0~9 打到 1602, 空格=空格, Enter=换行, Esc=清屏 (约 120 字节)': 'Echo PS/2 digits 0–9 on the 1602; space = space, Enter = newline, Esc = clear (≈120 bytes)',
+  '秒表 (空格启停 / C 清零)': 'Stopwatch (space start/pause / C clear)',
+  'MM:SS 计时: 空格=启动/暂停, C=清零; 1Hz 驱动, 展示状态机 (约 175 字节)': 'MM:SS timing: space = start/pause, C = clear; 1Hz-driven, demonstrates a state machine (≈175 bytes)',
+  '出厂时钟程序 (HH:MM:SS)': 'Factory clock program (HH:MM:SS)',
+  '示例默认程序: 走时时钟, 键 A=时+1, C=秒清零 (248 字节)': 'The example default: live clock, key A = hour+1, C = clear seconds (248 bytes)',
   },
 };
 
@@ -387,7 +417,7 @@ window.I18N_EN.help = `
         <li><b>4×4 matrix keypad</b>: 4 columns (C1..C4) + 4 rows (R1..R4). <b>Holding a key cell</b> connects its row and column (dragging a cell moves the chip). Row pins have built-in pull-downs (idle 0); right-click to switch to <b>pull-up</b> (idle 1, for column-active-low scans such as 74138/74145); if the pressed key's column is undriven, that row reads X.</li>
         <li><b>LCD1602</b>: RS + E + 8-bit data (HD44780 style, RW grounded). E rising edge latches; instruction 0x01 clears, 0x02 homes, 0x80|n sets the address (two lines start at 0x00/0x40); data supports ASCII and two-byte GB2312 Chinese. Right-click to edit the display text (rendered monospaced) / clear the screen.</li>
         <li><b>LCD12864 graphics</b>: ST7920 style — a 4-row×16-char text layer plus a 128×64 pixel graphics layer you can overlay. Extended instruction 0x36 enables graphics; 0x80|y sets the row, 0x80|x the byte column, then each written byte is 8 pixels with auto-advance; right-click to edit text / clear screen / clear graphics.</li>
-        <li><b>Memory</b>: <b>74187</b> ROM 256×4, <b>74S472</b> PROM 512×8 (right-click → edit / export, hex paste supported); <b>AT28C64B</b> EEPROM 8K×8, <b>AT28C256</b> EEPROM 32K×8 (real DIP-28 pinout with power pins 14/28 — they need power rails on the breadboard; writable in-circuit with /WE=0, right-click → edit / export); <b>74189</b> RAM 16×4, <b>6116</b> SRAM 2K×8 (right-click → snapshot / export); <b>6264</b> SRAM 8K×8 (real DIP-28, dual chip-select: /CS1 active-low + CS2 active-high — floating CS2 deselects the chip, tie it high). /CE, /CS, /WE, /OE are active-low; floating addresses read as 0.</li>
+        <li><b>Memory</b>: <b>74187</b> ROM 256×4, <b>74S472</b> PROM 512×8 (right-click → edit / export, hex paste supported); <b>AT28C64B</b> EEPROM 8K×8, <b>AT28C256</b> EEPROM 32K×8 (real DIP-28 pinout with power pins 14/28 — they need power rails on the breadboard; writable in-circuit with /WE=0, right-click → edit / export); <b>74189</b> RAM 16×4, <b>6116</b> SRAM 2K×8 (right-click → snapshot / export); <b>6264</b> SRAM 8K×8 (real DIP-28, dual chip-select: /CS1 active-low + CS2 active-high — floating CS2 deselects the chip, tie it high). /CE, /CS, /WE, /OE are active-low; floating addresses read as 0. In the VM-8 CPU example the program ROM offers <b>📥 Load VM-8 program…</b> — a small built-in library (counter / welcome / typewriter / stopwatch / factory clock) that assembles, burns into the ROM and cold-boots.</li>
       </ul>
       <h4>Levels & colors</h4>
       <ul>
@@ -402,6 +432,7 @@ window.I18N_EN.help = `
       <ul>
         <li><b>⏸ / ▶</b> pause or resume the clock; while paused, manual switch toggles still propagate.</li>
         <li><b>⏭ Step</b>: toggles every clock source by half a period per press — handy for single-stepping counters / flip-flops.</li>
+        <li><b>⏻ Power off / Power on / Restart</b> (Simulate menu) — power for the whole circuit: <b>off</b> = every chip unpowered (outputs X/Z, clocks stop, status bar shows ⏻); <b>on</b> = power-on reset — flip-flops/counters clear, <b>RAM is cleared</b> (volatile), <b>ROM/EEPROM kept</b> (non-volatile), LCD cleared awaiting program init, so the program restarts from address 0; <b>restart</b> = off then on. The VM-8 example also carries an on-circuit <b>power switch</b> that gates the clocks and holds the CPU in reset — that "boot" keeps RAM (programs self-initialize), the menu one clears it (real power cycle).</li>
         <li><b>Speed</b>: simulation-time multiplier. The status bar shows simulated time and the total event count (a runaway count means the circuit is oscillating).</li>
       </ul>
       <h4>Shortcuts</h4>

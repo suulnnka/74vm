@@ -412,15 +412,45 @@ function deleteChip(ch) {
   pruneSelection();
   scheduleSave();
 }
-function toggleRun() { sim.setRunning(!sim.running); syncRun(); }
+function toggleRun() {
+  if (!sim.powered) { toast(t('已关机 — 仿真菜单可开机或重启')); return; }
+  sim.setRunning(!sim.running); syncRun();
+}
+/* ---------- 电源控制 (等效整机通电/断电/重启) ----------
+ * 关机: 全部芯片断电 (输出 X/高阻, 时钟停振); 开机: 易失状态复位 + RAM 清零,
+ * ROM 保持, 液晶清屏等待程序初始化 — 程序从 0000H 重新执行 (冷启动) */
+function powerOff() {
+  if (!sim.powered) return;
+  sim.powerOff();
+  syncRun();
+  toast(t('已关机 — 全部芯片断电, 时钟停振 (仿真菜单可开机)'));
+}
+function powerOn() {
+  if (sim.powered) return;
+  sim.powerOn();
+  syncRun();
+  toast(t('已开机 — 易失状态复位 / RAM 清零 / ROM 保持, 程序从头执行'));
+}
+function powerRestart() {
+  sim.powerOff();
+  sim.powerOn();
+  syncRun();
+  toast(t('已重启 — 等效断电再上电, 程序从头执行'));
+}
 function syncRun() {
   const st = document.getElementById('stState');
-  st.textContent = sim.running ? t('● 运行中') : t('‖ 已暂停');
-  st.className = sim.running ? 'ok' : 'paused';
+  if (!sim.powered) {
+    st.textContent = t('⏻ 已关机');
+    st.className = 'off';
+  } else {
+    st.textContent = sim.running ? t('● 运行中') : t('‖ 已暂停');
+    st.className = sim.running ? 'ok' : 'paused';
+  }
   Menus.refresh();
 }
 function setSpeed(v) { app.speed = v; Menus.refresh(); }
 function simStep() {
+  if (!sim.powered) { toast(t('已关机 — 仿真菜单可开机')); return; }
   const n = sim.stepClocks();
   if (!n) toast(t('没有时钟源 — 已处理待定事件'));
 }
@@ -651,6 +681,7 @@ window.APP = {
   buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
   showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
   switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
+  powerOn, powerOff, powerRestart,
   fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   CW: 0, CH: 0,          // 画布 CSS 尺寸 (resizeCanvas 维护)
 };

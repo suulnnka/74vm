@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>74VM · 74系列数字电路模拟器</title>
-<link rel="stylesheet" href="css/style.css?v=11">
+<link rel="stylesheet" href="css/style.css?v=12">
 </head>
 <body>
 <header id="toolbar">
@@ -58,7 +58,7 @@
         <li><b>1602 液晶</b>：RS + E + 8 位数据 (HD44780 风格，RW 接地)。E 上升沿锁存；指令 0x01 清屏、0x02 回 home、0x80|n 设地址 (两行 0x00/0x40 起)；数据支持 ASCII 与 GB2312 双字节中文。右键可编辑显示文本 (等宽字体渲染) / 清屏。</li>
         <li><b>12864 图形液晶</b>：ST7920 风格，文字层 4 行×16 字符 + 图形层 128×64 点阵可叠加。扩充指令 0x36 开图形，0x80|y 设行、0x80|x 设字节列后写字节 (8 像素)，列自动推进；右键编辑文本 / 清屏 / 清除图形。</li>
         <li><b>PS/2 脚本</b>：键盘元件右键 → 编辑测试脚本（type 文本 / sleep 毫秒 / key 键名），运行脚本自动打字，方便测试。</li>
-        <li><b>存储器</b>：<b>74187</b> ROM 256×4、<b>74S472</b> PROM 512×8（右键 → 编辑内容 / 导出，十六进制可粘贴导入）；<b>AT28C64B</b> EEPROM 8K×8、<b>AT28C256</b> EEPROM 32K×8（真实 DIP-28 引脚，14/28 电源脚，面包板需接电源轨；/WE=0 可电改写，右键 → 编辑内容 / 导出）；<b>74189</b> RAM 16×4、<b>6116</b> SRAM 2K×8、<b>6264</b> SRAM 8K×8（右键 → 获取快照 / 导出，6264 双片选：/CS1 低有效 + CS2 高有效，悬空不选中）。/CE、/CS、/WE、/OE 低有效，地址悬空按 0。</li>
+        <li><b>存储器</b>：<b>74187</b> ROM 256×4、<b>74S472</b> PROM 512×8（右键 → 编辑内容 / 导出，十六进制可粘贴导入）；<b>AT28C64B</b> EEPROM 8K×8、<b>AT28C256</b> EEPROM 32K×8（真实 DIP-28 引脚，14/28 电源脚，面包板需接电源轨；/WE=0 可电改写，右键 → 编辑内容 / 导出）；<b>74189</b> RAM 16×4、<b>6116</b> SRAM 2K×8、<b>6264</b> SRAM 8K×8（右键 → 获取快照 / 导出，6264 双片选：/CS1 低有效 + CS2 高有效，悬空不选中）。/CE、/CS、/WE、/OE 低有效，地址悬空按 0。VM-8 CPU 示例的程序 ROM 支持 <b>📥 载入 VM-8 程序…</b>：内置程序库（计数器 / 迎宾动画 / 打字机 / 秒表 / 出厂时钟）汇编后烧入并自动冷启动，教学文档见 docs/vm8-guide.md。</li>
       </ul>
       <h4>电平与颜色</h4>
       <ul>
@@ -71,9 +71,10 @@
       </ul>
       <h4>运行控制</h4>
       <ul>
-        <li><b>⏸ / ▶</b> 暂停或恢复时钟；暂停时手动切换开关信号仍会正常传播。</li>
-        <li><b>⏭ 步进</b>：每按一次使所有时钟源翻转半周期，便于逐拍观察计数器 / 触发器。</li>
-        <li><b>速度</b>：仿真时间倍率。状态栏显示仿真时间与累计事件数（事件数持续暴涨说明电路在振荡）。</li>
+        <li><b>⏸ / ▶</b> 暂停或恢复时钟; 暂停时手动切换开关信号仍会正常传播。</li>
+        <li><b>⏭ 步进</b>: 每按一次使所有时钟源翻转半周期, 便于逐拍观察计数器 / 触发器。</li>
+        <li><b>⏻ 开机 / 关机 / 重启</b> (仿真菜单) — 整个电路的电源: <b>关机</b> = 全部芯片断电 (输出 X/高阻, 时钟停振, 状态栏显示 ⏻); <b>开机</b> = 上电复位 — 触发器/计数器清零, <b>RAM 清零</b>(易失), <b>ROM/EEPROM 保持</b>(非易失), 液晶清屏等待程序初始化, 程序从 0000H 重新执行; <b>重启</b> = 断电再上电。VM-8 示例电路中还有一颗<b>电源开关</b>, 门控时钟并保持 CPU 复位 — 该"开机"不清 RAM(程序自行初始化), 菜单开机才清(等效整机断电)。</li>
+        <li><b>速度</b>: 仿真时间倍率。状态栏显示仿真时间与累计事件数(事件数持续暴涨说明电路在振荡)。</li>
       </ul>
       <h4>快捷键</h4>
       <ul class="keys">
@@ -93,26 +94,26 @@
 </div>
 <input type="file" id="fileImport" accept=".json,application/json" hidden>
 <script src="js/i18n.js?v=61"></script>
-<script src="js/i18n-en.js?v=65"></script>
-<script src="js/engine.js?v=61"></script>
+<script src="js/i18n-en.js?v=66"></script>
+<script src="js/engine.js?v=62"></script>
 <script src="js/chips.js?v=64"></script>
 <script src="js/chips/gates.js?v=64"></script>
-<script src="js/chips/logic.js?v=64"></script>
-<script src="js/chips/interface.js?v=64"></script>
+<script src="js/chips/logic.js?v=65"></script>
+<script src="js/chips/interface.js?v=65"></script>
 <script src="js/chips/bus.js?v=64"></script>
-<script src="js/examples.js?v=62"></script>
+<script src="js/examples.js?v=63"></script>
 <script src="js/breadboard.js?v=65"></script>
 <script src="js/pcb.js?v=61"></script>
 <script src="js/easyeda.js?v=61"></script>
-<script src="js/dialog.js?v=64"></script>
-<script src="js/app/core.js?v=65"></script>
-<script src="js/app/dialogs.js?v=64"></script>
+<script src="js/dialog.js?v=65"></script>
+<script src="js/app/core.js?v=66"></script>
+<script src="js/app/dialogs.js?v=65"></script>
 <script src="js/app/ps2.js?v=64"></script>
 <script src="js/app/schematic.js?v=66"></script>
 <script src="js/app/breadboard.js?v=66"></script>
 <script src="js/app/pcb.js?v=64"></script>
 <script src="js/app/library.js?v=64"></script>
-<script src="js/app/menus.js?v=65"></script>
+<script src="js/app/menus.js?v=66"></script>
 <script src="js/app.js?v=64"></script>
 </body>
 </html>

@@ -22,7 +22,7 @@ const { BB } = require('../js/breadboard.js');
 const { PCB } = require('../js/pcb.js');
 const EasyEDA = require('../js/easyeda.js');
 
-const { V0, V1, VZ } = Sim;
+const { V0, V1, VZ, VX } = Sim;
 const EX = EXAMPLES.find(e => e.name.includes('VM-8'));
 
 let pass = 0, fail = 0;
@@ -370,7 +370,8 @@ console.log('\n[七] 出厂时钟程序集成测试');
   check('长跑事件量有界 (<6000 万)', sim.eventCount - ev0 < 60000000, sim.eventCount - ev0);
 }
 
-/* ---------------- [八] 面包板模式 ---------------- */
+/* ---------------- [八] 面包板模式 ----------------
+ * 注: [十] 电源控制 / [十一] 电源开关 / [十二] 程序库 见文件末尾 */
 console.log('\n[八] 面包板模式 (摆放 ' + EX.bb.cols + ' 列 × ' + EX.bb.boards + ' 板)');
 {
   BB.setCols(EX.bb.cols); BB.setBoards(EX.bb.boards);
@@ -445,6 +446,181 @@ console.log('\n[九] PCB 模式');
   check('导出网络名含 VCC', r.netNames.includes('VCC'), r.netNames.slice(0, 8));
   const nl = EasyEDA.buildNetlist(sim, PCB);
   check('通用网表导出结构完整', nl.format === '74vm-netlist' && nl.components.length === sim.chips.size);
+}
+
+/* ---------------- [十] 电源控制 (仿真菜单 开机/关机/重启) ----------------
+ * 关机 = 全局断电: 输出 X/高阻, 时钟停振; 开机 = 冷启动:
+ * 触发器/计数器复位, RAM 清零 (易失), ROM 保持 (非易失), 液晶清屏 */
+console.log('\n[十] 电源控制 (引擎级 powerOff / powerOn)');
+{
+  const sim = loadCpu();
+  const lcd = byType(sim, 'LCD1602')[0];
+  const ram = byType(sim, '6116')[0];
+  const rom = sim.chips.values().find(c => c.props.tag === 'vm8-program');
+  const txt = () => lcd.state.ddram.slice(0, 8).join('');
+  cycles(sim, 30);
+  sim.advance(2300000);
+  check('运行 2.3s 后走时', /^00:00:0[12]$/.test(txt()), txt());
+  ram.props.mem[0x40] = 0x5A;                        // RAM 留下数据
+  sim.powerOff();
+  check('关机: powered=false', sim.powered === false);
+  const clk0 = V(sim, byType(sim, 'CLOCK')[0], 1);
+  sim.advance(600);
+  check('关机: 主时钟停振 (电平冻结不翻转)', V(sim, byType(sim, 'CLOCK')[0], 1) === clk0);
+  const t0 = txt();
+  sim.advance(2000000);
+  check('关机: 2s 后液晶冻结', txt() === t0, [t0, txt()]);
+  sim.powerOn();
+  check('开机: powered=true', sim.powered === true);
+  check('开机: RAM 清零 (易失)', ram.props.mem[0x40] === 0 && ram.props.mem[0x10] === 0, ram.props.mem[0x40]);
+  check('开机: 程序 ROM 保持 (非易失)', rom.props.mem[0] === 0x10 && rom.props.mem[2] === 0x90, rom.props.mem.slice(0, 3));
+  sim.advance(80000);                                // 初始化 + 首次刷新 ≈ 45ms
+  check('开机: 程序重新初始化 → 00:00:00', txt() === '00:00:00', txt());
+  sim.advance(1300000);
+  check('开机: 继续走时', /^00:00:0[012]$/.test(txt()), txt());
+  // 时钟步进在关机时应为空操作
+  sim.powerOff();
+  check('关机: 时钟步进空操作', sim.stepClocks() === 0);
+  sim.powerOn();
+}
+
+/* ---------------- [十一] VM-8 电源开关 (电路级 冷启动) ----------------
+ * SW 门控主时钟与 1Hz、保持 PC/定序器复位、屏蔽按键捕获:
+ * 关 = 整机静止 (液晶冻结); 开 = 复位释放, 程序从 0000H 重新执行 */
+console.log('\n[十一] VM-8 电源开关 (电路级)');
+{
+  const sim = loadCpu();
+  const pwr = [...sim.chips.values()].find(c => c.type === 'SW' && c.props.label === '电源开关');
+  const lcd = byType(sim, 'LCD1602')[0];
+  const ps2 = byType(sim, 'PS2')[0];
+  const keyf = byType(sim, '7474')[1];
+  const txt = () => lcd.state.ddram.slice(0, 8).join('');
+  check('电源开关存在且初始为开', !!pwr && pwr.state.on === 1);
+  sim.advance(2300000);
+  check('开机走时 2.3s', /^00:00:0[12]$/.test(txt()), txt());
+  pwr.state.on = 0; sim.driveNow(pwr, 1, 0);         // 关机
+  sim.advance(3000000);
+  const frozen = txt();
+  sim.advance(2000000);
+  check('开关关: 液晶冻结 (时钟停振)', txt() === frozen, [frozen, txt()]);
+  // 关机中按键: LATCH 被电源信号门控, 键标志不置位
+  ps2.state.queue.push(0x1C);
+  sim.reevalAll();
+  sim.advance(15000);
+  check('开关关: 按键不被捕获 (键标志=0)', sim.pinDisplay(keyf.pinByNum[5]) === 0, sim.pinDisplay(keyf.pinByNum[5]));
+  pwr.state.on = 1; sim.driveNow(pwr, 1, 1);         // 开机 → 冷启动
+  sim.advance(80000);                                // 初始化 + 首次刷新 ≈ 45ms
+  check('开关开: 程序从 0000H 重跑 → 00:00:00', txt() === '00:00:00', txt());
+  sim.advance(1300000);
+  check('开关开: 继续走时', /^00:00:0[012]$/.test(txt()), txt());
+}
+
+/* ---------------- [十二] 内置程序库 (右键程序 ROM → 载入 VM-8 程序) ---------------- */
+console.log('\n[十二] 内置程序库 (' + VM8.PROGS.length + ' 个程序)');
+{
+  // 静态: 大小 / 反汇编扫描 / clock 与出厂一致
+  const LEN = { 0: 1, 1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 2, 8: 1, 9: 1, 0xA: 2, 0xB: 2, 0xC: 2, 0xD: 1, 0xE: 1, 0xF: 1 };
+  for (const p of VM8.PROGS) {
+    check(p.id + ': 大小 ' + p.size + ' ≤ 254 且非空', p.size >= 1 && p.size <= 254, p.size);
+    let i = 0, ok = true;
+    while (i < p.size) {
+      const op = p.mem[i] >> 4;
+      if (!LEN[op] || (op === 0xF && (p.mem[i] & 0x7) !== 0)) { ok = false; break; }
+      i += LEN[op];
+    }
+    check(p.id + ': 反汇编扫描合法闭合', ok && i === p.size);
+  }
+  check('clock 程序与出厂 ROM 一致',
+    VM8.PROGS[VM8.PROGS.length - 1].mem.join(',') === VM8.PROG.mem.join(','));
+
+  function loadCpuMem(mem) {
+    const b = EX.build();
+    b.chips.find(c => c.props.tag === 'vm8-program').props.mem = mem.slice();
+    const sim2 = new Engine(LIB);
+    sim2.load({ chips: b.chips, wires: b.wires });
+    return sim2;
+  }
+  const lcdText = (sim2, row) => {
+    const dd = byType(sim2, 'LCD1602')[0].state.ddram;
+    const off = row === 2 ? 0x40 : 0;
+    return dd.slice(off, off + 16).join('').replace(/\s+$/, '');
+  };
+
+  // counter: 1Hz 走秒循环
+  {
+    const p = VM8.PROGS.find(x => x.id === 'counter');
+    const sim2 = loadCpuMem(p.mem);
+    sim2.advance(80000);
+    check('counter: 上电显示 00', lcdText(sim2) === '00', lcdText(sim2));
+    sim2.advance(1300000);
+    check('counter: 1.3s → 01', lcdText(sim2) === '01', lcdText(sim2));
+    sim2.advance(9000000);
+    check('counter: 10.3s → 10 (秒十位进位)', lcdText(sim2) === '10', lcdText(sim2));
+  }
+  // hello: 中文逐字打出 + 按键重播
+  {
+    const p = VM8.PROGS.find(x => x.id === 'hello');
+    const sim2 = loadCpuMem(p.mem);
+    sim2.advance(200000);
+    check('hello: 显示「你好 74VM-8!」', lcdText(sim2) === '你好 74VM-8!', lcdText(sim2));
+    const ps2 = byType(sim2, 'PS2')[0];
+    ps2.state.queue.push(0x2D);                      // R 的 make 码
+    sim2.reevalAll();
+    sim2.advance(100000);                            // 捕获 + 清屏重播
+    check('hello: 按任意键重播', lcdText(sim2) === '你好 74VM-8!', lcdText(sim2));
+  }
+  // typewriter: 数字回显 / 空格 / Enter 换行 / 未映射忽略 / Esc 清屏
+  {
+    const p = VM8.PROGS.find(x => x.id === 'typewriter');
+    const sim2 = loadCpuMem(p.mem);
+    const ps2 = byType(sim2, 'PS2')[0];
+    // 程序处理一键最长 ~45ms (比较链), 100ms 间隔避免 CLF 清除窗口竞态
+    const type = code => { ps2.state.queue.push(code); sim2.reevalAll(); sim2.advance(100000); };
+    sim2.advance(50000);
+    type(0x16); type(0x1E); type(0x26);              // 1 2 3
+    check('typewriter: 打出 123', lcdText(sim2) === '123', lcdText(sim2));
+    type(0x29);                                      // 空格
+    type(0x3D); type(0x3E); type(0x46); type(0x45);  // 7890
+    check('typewriter: 空格与 7890', lcdText(sim2) === '123 7890', lcdText(sim2));
+    type(0x5A); type(0x25);                          // Enter → 第 2 行, 再打 4
+    check('typewriter: Enter 后打到第 2 行', lcdText(sim2, 2) === '4', lcdText(sim2, 2));
+    type(0x2D);                                      // R 未映射 → 忽略
+    check('typewriter: 未映射键忽略', lcdText(sim2, 2) === '4', lcdText(sim2, 2));
+    type(0x76);                                      // Esc → 清屏
+    check('typewriter: Esc 清屏', lcdText(sim2) === '' && lcdText(sim2, 2) === '',
+      [lcdText(sim2), lcdText(sim2, 2)]);
+  }
+  // stopwatch: 空格启停 / C 清零 (1Hz tick 相位 0.5s 对齐 → 用相位无关断言)
+  {
+    const p = VM8.PROGS.find(x => x.id === 'stopwatch');
+    const sim2 = loadCpuMem(p.mem);
+    const ps2 = byType(sim2, 'PS2')[0];
+    const ram = byType(sim2, '6116')[0];
+    const txt2 = () => lcdText(sim2).slice(0, 5);
+    const key = code => { ps2.state.queue.push(code); sim2.reevalAll(); sim2.advance(60000); };
+    const sec = () => ram.props.mem[0x12] * 10 + ram.props.mem[0x11];
+    sim2.advance(50000);
+    check('stopwatch: 上电显示 00:00', txt2() === '00:00', txt2());
+    sim2.advance(2300000);
+    check('stopwatch: 2.3s → 00:02', txt2() === '00:02', txt2());
+    key(0x29);                                       // 空格 → 暂停
+    const s0 = sec();
+    sim2.advance(2050000);                           // 任何 2s 窗口必含 ≥2 个 tick
+    check('stopwatch: 暂停后秒数不变', sec() === s0 && txt2() === '00:02', [s0, sec(), txt2()]);
+    key(0x29);                                       // 空格 → 继续
+    sim2.advance(2050000);
+    check('stopwatch: 恢复后 +2~3 秒', sec() - s0 >= 2 && sec() - s0 <= 3, [s0, sec()]);
+    key(0x21);                                       // C → 清零 (仍计时)
+    check('stopwatch: C 清零', sec() === 0 && txt2() === '00:00', [sec(), txt2()]);
+    sim2.advance(2050000);
+    check('stopwatch: 清零后继续计时', sec() >= 2 && sec() <= 3, sec());
+  }
+  // 载入即冷启动: 烧入 counter 后 (菜单动作等价) 走时显示计数
+  {
+    const sim2 = loadCpu(VM8.PROGS.find(x => x.id === 'counter').src);
+    sim2.advance(1300000);
+    check('loadCpu(程序源码) 等价路径: 1.3s → 01', lcdText(sim2) === '01', lcdText(sim2));
+  }
 }
 
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败');

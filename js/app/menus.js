@@ -13,6 +13,7 @@
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
     showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus, setLevelColor,
     switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
+    powerOn, powerOff, powerRestart,
     fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   } = window.APP;
   const { autoAll: bbAutoAll, apply: applyBB, sanitize: bbSanitize, fit: fitBreadboard, setLabels: setBBLabels, setJumpers: setBBJumpers } = APP.bb;
@@ -149,8 +150,12 @@ const Menus = {
         { label: t('PCB 模式'), hint: '3', radio: 'mode', val: 'pcb', act: () => switchMode('pcb') },
       ]},
       { label: t('仿真(S)'), items: [
-        { label: () => (sim.running ? t('暂停') : t('运行')), hint: t('空格'), act: toggleRun },
-        { label: t('时钟步进'), hint: t('半周期'), act: simStep },
+        { label: () => (sim.running ? t('暂停') : t('运行')), hint: t('空格'), act: toggleRun, enabled: () => sim.powered },
+        { label: t('时钟步进'), hint: t('半周期'), act: simStep, enabled: () => sim.powered },
+        { sep: true },
+        { label: t('开机'), hint: t('上电冷启动'), radio: 'power', val: 'on', act: powerOn },
+        { label: t('关机'), hint: t('全部芯片断电'), radio: 'power', val: 'off', act: powerOff },
+        { label: t('重启'), hint: t('断电再上电, 程序从头执行'), act: powerRestart },
         { sep: true },
         { label: t('速度 ×1'), radio: 'speed', val: 1, act: () => setSpeed(1) },
         { label: t('速度 ×10'), radio: 'speed', val: 10, act: () => setSpeed(10) },
@@ -181,6 +186,7 @@ const Menus = {
   radioChecked(it) {
     if (it.radio === 'mode') return app.mode === it.val;
     if (it.radio === 'speed') return app.speed === it.val;
+    if (it.radio === 'power') return it.val === 'on' ? sim.powered : !sim.powered;
     if (it.radio === 'lib') return app.libShown;
     if (it.radio === 'labels') return app.bbLabels;
     if (it.radio === 'jumpers') return app.bbJumpers;

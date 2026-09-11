@@ -27,11 +27,12 @@ function B() {
 /* =========================================================================
  * VM-8 — 74 系列微码 8 位 CPU (时钟计算机示例的构建核心)
  *
- * 架构 (40 个元件):
+ * 架构 (41 个元件):
  *   总线 8 位; PC=2×74161(+74245 总线缓冲); MAR/IR/A/B/OUT=74374;
  *   程序 ROM=74S472 256B; RAM=6116; ALU=74283×2+7486×2(+74245 缓冲, 加/减);
  *   定序器=74161 (6 节拍/指令, 下降沿计数); 控制 ROM=74S472×3
- *   (地址 = {节拍3位, IR.bit3, 操作码4位}); Z 标志=7474 (或树+触发器)。
+ *   (地址 = {节拍3位, IR.bit3, 操作码4位}); Z 标志=7474 (或树+触发器);
+ *   电源开关 SW: 门控主时钟与 1Hz, 并保持 PC/定序器复位 (关机=整机静止)
  * 外设: LCD1602 (OUT 寄存器直驱数据, RS/E 由微码产生);
  *   PS/2 → 74164 移位 + 74161 位计数 (第 9 位对齐) + 74374 键码锁存;
  *   1Hz 时钟 → 7474 秒沿标志; 74245 汇成输入口 (bit0=秒, bit1=新键)。
@@ -310,8 +311,312 @@ const VM8_PROG = vm8Assemble([
   '        JMP MAIN',
 ]);
 
+/* ---- VM-8 内置程序库 ----
+ * 可在电路中右键程序 ROM (74S472, 标签 vm8-program) → 载入 VM-8 程序, 烧入后自动冷启动。
+ * 教学线索: 从计数器 → 迎宾 → 打字机 → 秒表 → 出厂时钟, 难度递进;
+ * 全部程序只使用 ISA 的 16 条指令, RAM 变量统一从 0x10 起 (0x00~0x0F 保留给 0 页用法)。 */
+const VM8_PROGS = [
+  {
+    id: 'counter', name: '计数器 (00~59 循环)',
+    desc: '最小程序: 轮询 1Hz 秒脉冲, 1602 显示 00~59 循环 (69 字节)',
+    src: [
+      '; 计数器: 第 1 行显示 00~59 循环, 1Hz 实时时钟驱动 (入门: 轮询 + BCD 进位 + 显示)',
+      'SEC1  = 0x10        ; RAM: 秒个位 (BCD)',
+      'SEC10 = 0x11        ; RAM: 秒十位',
+      '        LDI 0x01    ; LCD 指令 0x01 = 清屏',
+      '        CMD',
+      '        LDI 0',
+      '        STA SEC1',
+      '        STA SEC10',
+      '        JMP SHOW    ; 上电先显示 00, 再进轮询',
+      'LOOP:   TCK         ; A = 输入口: bit0=秒脉冲, bit1=新按键',
+      '        CPI 1       ; 只踩到秒脉冲?',
+      '        JZ TICK',
+      '        CPI 3       ; 秒脉冲与新键同拍: 先走秒',
+      '        JZ TICK',
+      '        JMP LOOP',
+      'TICK:   CLT         ; 清秒标志 (电平标志, 读完必须清)',
+      '        LDA SEC1',
+      '        ADI 1',
+      '        CPI 10',
+      '        JZ C1',
+      '        STA SEC1',
+      '        JMP SHOW',
+      'C1:     LDI 0',
+      '        STA SEC1',
+      '        LDA SEC10',
+      '        ADI 1',
+      '        CPI 6',
+      '        JZ C10',
+      '        STA SEC10',
+      '        JMP SHOW',
+      'C10:    LDI 0',
+      '        STA SEC10   ; 59 → 00',
+      'SHOW:   LDI 0x80    ; LCD 指令 0x80|0 = 光标回 (0,0)',
+      '        CMD',
+      '        LDA SEC10',
+      '        ADI 48      ; BCD 数字 → ASCII',
+      '        OUT',
+      '        LDA SEC1',
+      '        ADI 48',
+      '        OUT',
+      '        JMP LOOP',
+    ],
+  },
+  {
+    id: 'hello', name: '迎宾动画 (按任意键重播)',
+    desc: '开机逐字打出「你好 74VM-8!」(GB2312 中文), 按任意键重播 (57 字节)',
+    src: [
+      '; 迎宾: 逐字打出「你好 74VM-8!」, 按任意键重播 (松开键的 break 码被忽略)',
+      'START:  LDI 0x01    ; 清屏',
+      '        CMD',
+      '        LDI 0xC4    ; 「你」 GB2312 首字节 (液晶自动配对双字节)',
+      '        OUT',
+      '        LDI 0xE3    ; 「你」 次字节',
+      '        OUT',
+      '        LDI 0xBA    ; 「好」 首字节',
+      '        OUT',
+      '        LDI 0xC3    ; 「好」 次字节',
+      '        OUT',
+      '        LDI 0x20    ; 空格',
+      '        OUT',
+      '        LDI 0x37    ; 7',
+      '        OUT',
+      '        LDI 0x34    ; 4',
+      '        OUT',
+      '        LDI 0x56    ; V',
+      '        OUT',
+      '        LDI 0x4D    ; M',
+      '        OUT',
+      '        LDI 0x2D    ; -',
+      '        OUT',
+      '        LDI 0x38    ; 8',
+      '        OUT',
+      '        LDI 0x21    ; !',
+      '        OUT',
+      'WAIT:   TCK',
+      '        CPI 0       ; 无事件: 继续等',
+      '        JZ WAIT',
+      '        CPI 1       ; 只有秒脉冲: 忽略',
+      '        JZ WAIT',
+      '        CLT         ; 秒+键同拍时顺带清秒标志',
+      '        KBD         ; 读走键码并清键标志',
+      '        CLF',
+      '        CPI 0xF0    ; break (松开): 忽略',
+      '        JZ WAIT',
+      '        JMP START   ; 任意按键 → 重播',
+    ],
+  },
+  {
+    id: 'typewriter', name: '打字机 (数字/空格/回车/Esc)',
+    desc: 'PS/2 数字键 0~9 打到 1602, 空格=空格, Enter=换行, Esc=清屏 (约 120 字节)',
+    src: [
+      '; 打字机: 数字键 0~9 回显到 1602, 空格=空格, Enter=换到第 2 行, Esc=清屏',
+      '; (完整键盘映射需要 256 项查表 — VM-8 没有变址寻址, 这正是教学留白, 见 docs/vm8-guide.md)',
+      '        LDI 0x01',
+      '        CMD',
+      'MAIN:   TCK',
+      '        CPI 2       ; 新按键?',
+      '        JZ KEY',
+      '        CPI 3',
+      '        JZ KEY',
+      '        JMP MAIN',
+      'KEY:    KBD         ; A = 扫描码',
+      '        CLF',
+      '        CPI 0xF0    ; break 前缀: 丢弃',
+      '        JZ MAIN',
+      '        CPI 0x76    ; Esc → 清屏',
+      '        JZ CLEAR',
+      '        CPI 0x5A    ; Enter → 换行',
+      '        JZ NEWLN',
+      '        CPI 0x29    ; 空格',
+      '        JZ SPACE',
+      '        CPI 0x45    ; 0',
+      '        JZ D0',
+      '        CPI 0x46    ; 9',
+      '        JZ D9',
+      '        CPI 0x16    ; 1',
+      '        JZ D1',
+      '        CPI 0x1E    ; 2',
+      '        JZ D2',
+      '        CPI 0x26    ; 3',
+      '        JZ D3',
+      '        CPI 0x25    ; 4',
+      '        JZ D4',
+      '        CPI 0x2E    ; 5',
+      '        JZ D5',
+      '        CPI 0x36    ; 6',
+      '        JZ D6',
+      '        CPI 0x3D    ; 7',
+      '        JZ D7',
+      '        CPI 0x3E    ; 8',
+      '        JZ D8',
+      '        JMP MAIN    ; 其他键不认 (映射表思想的局限)',
+      'CLEAR:  LDI 0x01',
+      '        CMD',
+      '        JMP MAIN',
+      'NEWLN:  LDI 0xC0    ; 0x80|0x40 = 第 2 行行首',
+      '        CMD',
+      '        JMP MAIN',
+      'SPACE:  LDI 0x20',
+      '        OUT',
+      '        JMP MAIN',
+      'D0:     LDI 48',
+      '        OUT',
+      '        JMP MAIN',
+      'D1:     LDI 49',
+      '        OUT',
+      '        JMP MAIN',
+      'D2:     LDI 50',
+      '        OUT',
+      '        JMP MAIN',
+      'D3:     LDI 51',
+      '        OUT',
+      '        JMP MAIN',
+      'D4:     LDI 52',
+      '        OUT',
+      '        JMP MAIN',
+      'D5:     LDI 53',
+      '        OUT',
+      '        JMP MAIN',
+      'D6:     LDI 54',
+      '        OUT',
+      '        JMP MAIN',
+      'D7:     LDI 55',
+      '        OUT',
+      '        JMP MAIN',
+      'D8:     LDI 56',
+      '        OUT',
+      '        JMP MAIN',
+      'D9:     LDI 57',
+      '        OUT',
+      '        JMP MAIN',
+    ],
+  },
+  {
+    id: 'stopwatch', name: '秒表 (空格启停 / C 清零)',
+    desc: 'MM:SS 计时: 空格=启动/暂停, C=清零; 1Hz 驱动, 展示状态机 (约 175 字节)',
+    src: [
+      '; 秒表: 显示 MM:SS; 空格 = 启动/暂停, C = 清零; 1Hz 实时时钟驱动',
+      'RUN   = 0x10        ; 1=计时中, 0=暂停',
+      'SEC1  = 0x11',
+      'SEC10 = 0x12',
+      'MIN1  = 0x13',
+      'MIN10 = 0x14',
+      '        LDI 0x01',
+      '        CMD',
+      '        LDI 1       ; 上电即开始计时',
+      '        STA RUN',
+      '        LDI 0',
+      '        STA SEC1',
+      '        STA SEC10',
+      '        STA MIN1',
+      '        STA MIN10',
+      '        JMP SHOW',
+      'MAIN:   TCK',
+      '        CPI 1',
+      '        JZ TICK',
+      '        CPI 3',
+      '        JZ TICK',
+      '        CPI 2',
+      '        JZ KEY',
+      '        JMP MAIN',
+      'TICK:   CLT',
+      '        LDA RUN',
+      '        CPI 1       ; 暂停中则不计秒',
+      '        JZ ADDSEC',
+      '        JMP MAIN',
+      'ADDSEC: LDA SEC1',
+      '        ADI 1',
+      '        CPI 10',
+      '        JZ TS1',
+      '        STA SEC1',
+      '        JMP SHOW',
+      'TS1:    LDI 0',
+      '        STA SEC1',
+      '        LDA SEC10',
+      '        ADI 1',
+      '        CPI 6',
+      '        JZ TS10',
+      '        STA SEC10',
+      '        JMP SHOW',
+      'TS10:   LDI 0',
+      '        STA SEC10',
+      '        LDA MIN1',
+      '        ADI 1',
+      '        CPI 10',
+      '        JZ TM1',
+      '        STA MIN1',
+      '        JMP SHOW',
+      'TM1:    LDI 0',
+      '        STA MIN1',
+      '        LDA MIN10',
+      '        ADI 1',
+      '        CPI 10',
+      '        JZ TM10',
+      '        STA MIN10',
+      '        JMP SHOW',
+      'TM10:   LDI 0',
+      '        STA MIN10   ; 99:59 → 00:00',
+      '        JMP SHOW',
+      'KEY:    KBD',
+      '        CLF',
+      '        CPI 0xF0',
+      '        JZ MAIN',
+      '        CPI 0x29    ; 空格: 启动/暂停切换',
+      '        JZ TGL',
+      '        CPI 0x21    ; C: 清零 (不清 RUN)',
+      '        JZ RST',
+      '        JMP MAIN',
+      'TGL:    LDA RUN',
+      '        CPI 1',
+      '        JZ PAUSE',
+      '        LDI 1',
+      '        STA RUN',
+      '        JMP MAIN',
+      'PAUSE:  LDI 0',
+      '        STA RUN',
+      '        JMP MAIN',
+      'RST:    LDI 0',
+      '        STA SEC1',
+      '        STA SEC10',
+      '        STA MIN1',
+      '        STA MIN10',
+      'SHOW:   LDI 0x80',
+      '        CMD',
+      '        LDA MIN10',
+      '        ADI 48',
+      '        OUT',
+      '        LDA MIN1',
+      '        ADI 48',
+      '        OUT',
+      '        LDI 0x3A    ; ":"',
+      '        OUT',
+      '        LDA SEC10',
+      '        ADI 48',
+      '        OUT',
+      '        LDA SEC1',
+      '        ADI 48',
+      '        OUT',
+      '        JMP MAIN',
+    ],
+  },
+  {
+    id: 'clock', name: '出厂时钟程序 (HH:MM:SS)',
+    desc: '示例默认程序: 走时时钟, 键 A=时+1, C=秒清零 (248 字节)',
+    mem: VM8_PROG.mem.slice(),
+    size: VM8_PROG.size,
+    labels: VM8_PROG.labels,
+  },
+];
+
 const EXAMPLES = [];
-global.VM8 = { MC: VM8_MC, PROG: VM8_PROG, assemble: vm8Assemble, OPS: VM8_OPS };
+global.VM8 = { MC: VM8_MC, PROG: VM8_PROG, PROGS: VM8_PROGS, assemble: vm8Assemble, OPS: VM8_OPS };
+/* 程序库源码惰性汇编 (clock 程序直接引用已汇编结果); Node 测试同样可用 */
+for (const p of VM8_PROGS) if (!p.mem) {
+  const r = vm8Assemble(p.src);
+  p.mem = r.mem; p.size = r.size; p.labels = r.labels;
+}
 
 /* 1. SR 锁存器 (7400 与非门交叉耦合) */
 EXAMPLES.push({
@@ -686,7 +991,7 @@ EXAMPLES.push({
 /* 17. VM-8 微码 8 位 CPU 时钟计算机 */
 EXAMPLES.push({
   name: 'VM-8 CPU 时钟计算机 (1602+PS/2)',
-  desc: 'ROM 程序驱动 1602 显示 HH:MM:SS; 键 A=时+1, C=秒清零; 1Hz 实时时钟输入 (按键恰逢 CLF 清除窗口可能丢失, 重按即可)',
+  desc: 'ROM 程序驱动 1602 显示 HH:MM:SS; 键 A=时+1, C=秒清零; 1Hz 实时时钟输入; 电源开关=整机冷启动 (右键程序 ROM 可载入其他内置程序); (按键恰逢 CLF 清除窗口可能丢失, 重按即可)',
   bb: { cols: 185, boards: 3 },
   build() {
     const b = B();
@@ -724,6 +1029,7 @@ EXAMPLES.push({
     A('alul', '74283', 1090, 1000); A('aluh', '74283', 1230, 1000);
     A('alubuf', '74245', 1370, 1000);
     A('outR', '74374', 100, 1220); A('lcd', 'LCD1602', 340, 1220);
+    A('pwr', 'SW', 500, 1260, { props: { label: '电源开关' }, state: { on: 1 } });
     A('vcc', 'VCC', 640, 1260);    A('gnd', 'GND', 730, 1260);
 
     /* ---- 8 位总线 ---- */
@@ -813,9 +1119,13 @@ EXAMPLES.push({
     N([id.inv2, 8], [id.and2, 10]);
     N([id.and2, 8], [id.flags, 3]);                // Z 标志 CK = CLK·EO
 
-    /* ---- 主时钟门控 / LCD 选通 / RAM 写窗 ---- */
-    N([id.mc2, 18], [id.and4, 2]);                 // D7=RUN(1=运行): 0 时停振
-    N([id.ckSys, 1], [id.and4, 1]);                // sysclk = CLK·RUN
+    /* ---- 主时钟门控 / LCD 选通 / RAM 写窗 ----
+     * 电源开关: 关 = 主时钟停振 + PC/定序器保持复位 + 按键/秒脉冲不捕获 (整机静止);
+     * 开 = 复位释放, 程序从 0000H 重新执行 (等效一次冷启动) */
+    N([id.mc2, 18], [id.and4, 13]);                // D7=RUN 微码停机位 (1=运行)
+    N([id.pwr, 1], [id.and4, 12]);                 // 电源开关与 RUN 相与
+    N([id.and4, 11], [id.and4, 2]);
+    N([id.ckSys, 1], [id.and4, 1]);                // sysclk = CLK·PWR·RUN: 关机或停机时停振
     N([id.and4, 3], [id.inv1, 11]);
     N([id.inv1, 10], [id.stp, 2]);                 // 定序器下降沿推进
     N([id.and4, 3], [id.pclo, 2]);                 // PC 在上升沿计数/装数
@@ -848,8 +1158,10 @@ EXAMPLES.push({
     N([id.inv1, 4], [id.and3, 10]);                // +~QB → LATCH 解码 = count 9
     N([id.ps2, 1], [id.and5, 1]);                  // CLK 选通 (位中心)
     N([id.and3, 8], [id.and5, 2]);                 // LATCH = count9·CLK (位中心 9, d0..d7 已稳定)
-    N([id.and5, 3], [id.kreg, 11]);                // LATCH: 键码锁存
-    N([id.and5, 3], [id.keyf, 3]);                 // 置位键标志 (D=VCC)
+    N([id.and5, 3], [id.and5, 12]);
+    N([id.pwr, 1], [id.and5, 13]);                 // LATCH·PWR: 关机时不捕获按键
+    N([id.and5, 11], [id.kreg, 11]);               // LATCH: 键码锁存
+    N([id.and5, 11], [id.keyf, 3]);                // 置位键标志 (D=VCC)
     N([id.and3, 6], [id.and4, 9]);                 // 公共项
     N([id.kcnt, 13], [id.and4, 10]);               // +QB → CLEAR 解码 = count 9/11
     N([id.ps2, 1], [id.and5, 4]);                  // CLK 选通
@@ -860,7 +1172,9 @@ EXAMPLES.push({
     N([id.stp, 12], [id.and3, 12]);                // 定序器 QC·QB (6=110) → 回绕
     N([id.stp, 13], [id.and3, 13]);
     N([id.and3, 11], [id.inv1, 9]);
-    N([id.inv1, 8], [id.stp, 1]);
+    N([id.pwr, 1], [id.and5, 9]);
+    N([id.inv1, 8], [id.and5, 10]);                // 定序器 ~CLR = 回绕解码·PWR: 关机保持复位
+    N([id.and5, 8], [id.stp, 1]);
 
     /* ---- 控制 ROM 地址: {定序器3位, IR 低, IR 高} ---- */
     for (const k of ['mc0', 'mc1', 'mc2']) {
@@ -889,13 +1203,17 @@ EXAMPLES.push({
     N([id.mc2, 12], [id.keyf, 1]);                 // /KF
 
     /* ---- 输入口 / LCD 数据 ---- */
-    N([id.ckTick, 1], [id.flags, 11]);             // 1Hz → 秒标志 CK (D=VCC 置位)
+    N([id.ckTick, 1], [id.nand, 12]);
+    N([id.pwr, 1], [id.nand, 13]);
+    N([id.nand, 11], [id.inv2, 13]);               // 秒标志 CK = 1Hz·PWR: 关机时实时时钟停走
+    N([id.inv2, 12], [id.flags, 11]);              // (D=VCC 置位)
     N([id.flags, 8], [id.port, 19]);               // 秒标志 → bit0
     N([id.keyf, 5], [id.port, 18]);                // 键标志 → bit1
     for (let j = 0; j < 8; j++) N([id.outR, 19 - j], [id.lcd, 3 + j]);
 
     /* ---- 逻辑 1 / 0 汇流点 ---- */
-    N([id.vcc, 1], [id.pclo, 1], [id.pchi, 1], [id.pclo, 10]);
+    N([id.pwr, 1], [id.pclo, 1], [id.pchi, 1]);    // PC ~CLR ← 电源开关: 关机保持清零, 开机从 0 起跑
+    N([id.vcc, 1], [id.pclo, 10]);
     N([id.pclo, 15], [id.pchi, 10]);               // 级联: 低级 RCO → 高级 ENT
     N([id.vcc, 1], [id.stp, 7], [id.stp, 9], [id.stp, 10]);
     N([id.vcc, 1], [id.kcnt, 7], [id.kcnt, 9], [id.kcnt, 10]);

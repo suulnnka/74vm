@@ -167,9 +167,104 @@ const Dialog = (() => {
     confirm: opts => open(Object.assign({ message: '' }, opts)),
     /* info({title, message}) → Promise<true>: 纯信息查看弹窗, 只有"关闭"按钮 */
     info: opts => open(Object.assign({ message: '', okText: t('关闭'), hideCancel: true }, opts)),
+    /* pick({title, message, options:[{label, hint}]}) → Promise<number|null>: 单选列表 */
+    pick: opts => pickDialog(opts),
     /* 关闭全部窗口 (上层先关) */
     closeAll: () => { for (const w of [...wins].reverse()) w.close(null); },
     /* 当前并存窗口数 */
     get count() { return wins.length; },
   };
+
+  function pickDialog(opts) {
+    const o = Object.assign({ title: '', message: '', options: [] }, opts);
+    return new Promise(resolve => {
+      let done = false;
+      const finish = v => {
+        if (done) return;
+        done = true;
+        const i = wins.indexOf(win);
+        if (i >= 0) wins.splice(i, 1);
+        overlay.remove();
+        resolve(v);
+      };
+      const stacked = wins.length > 0;
+      const overlay = document.createElement('div');
+      overlay.className = 'modal' + (stacked ? ' stacked' : '');
+      overlay.style.zIndex = ++zTop;
+
+      const box = document.createElement('div');
+      box.className = 'modal-box dialog-box';
+
+      const head = document.createElement('div');
+      head.className = 'modal-head dlg-head';
+      const title = document.createElement('b');
+      title.textContent = o.title;
+      const x = document.createElement('button');
+      x.className = 'btn'; x.textContent = '✕'; x.title = t('取消 (Esc)');
+      x.onclick = () => finish(null);
+      head.appendChild(title); head.appendChild(x);
+
+      const body = document.createElement('div');
+      body.className = 'dlg-body';
+      if (o.message) {
+        const m = document.createElement('div');
+        m.className = 'dlg-msg';
+        m.textContent = o.message;
+        body.appendChild(m);
+      }
+      const list = document.createElement('div');
+      list.className = 'dlg-pick';
+      o.options.forEach((opt, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'btn pick-item';
+        const lb = document.createElement('b');
+        lb.textContent = opt.label;
+        btn.appendChild(lb);
+        if (opt.hint) {
+          const h = document.createElement('span');
+          h.className = 'pick-hint';
+          h.textContent = opt.hint;
+          btn.appendChild(h);
+        }
+        btn.onclick = () => finish(i);
+        list.appendChild(btn);
+      });
+      body.appendChild(list);
+
+      const foot = document.createElement('div');
+      foot.className = 'dlg-foot';
+      const btnCancel = document.createElement('button');
+      btnCancel.className = 'btn';
+      btnCancel.textContent = o.cancelText || t('取消');
+      btnCancel.onclick = () => finish(null);
+      foot.appendChild(btnCancel);
+
+      box.appendChild(head); box.appendChild(body); box.appendChild(foot);
+      overlay.appendChild(box);
+
+      overlay.addEventListener('pointerdown', e => { if (e.target === overlay) finish(null); });
+      box.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+      });
+      head.addEventListener('pointerdown', e => {   // 标题栏拖动移位 (与 open 一致)
+        if (e.button !== 0 || e.target.closest('button')) return;
+        e.preventDefault();
+        const r = box.getBoundingClientRect();
+        box.style.position = 'fixed';
+        box.style.left = r.left + 'px'; box.style.top = r.top + 'px';
+        box.style.width = r.width + 'px';
+        const dx = e.clientX - r.left, dy = e.clientY - r.top;
+        const move = ev => { box.style.left = Math.max(0, ev.clientX - dx) + 'px'; box.style.top = Math.max(0, ev.clientY - dy) + 'px'; };
+        const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+      });
+
+      const win = { close: finish };
+      wins.push(win);
+      document.body.appendChild(overlay);
+      btnCancel.focus();
+    });
+  }
 })();

@@ -94,6 +94,7 @@ class Engine {
     this.seq = 0;
     this.simTime = 0;            // µs
     this.running = true;
+    this.powered = true;         // 全局电源 (仿真菜单 开机/关机/重启)
     this.eventCount = 0;         // 累计事件数(观测振荡用)
     this.overload = false;       // 单帧事件超限(疑似振荡)
     this.version = 0;            // 结构版本号(UI 触发自动保存)
@@ -270,11 +271,15 @@ class Engine {
   }
 
   /** 上电扰动(仅作用于 driven===X 的门输出) */
-  /** 外部状态变更 (如 ROM 内容改写) 后: 重评估全部元件并结算 */
+  /** 外部状态变更 (如 ROM 内容改写/重新上电) 后: 重评估全部元件并结算。
+   *  评估前先做 rebase: 时序元件的边沿检测基线对齐当前时钟电平,
+   *  否则全量重评估会把 "prev=0 而当前 CK=1" 误判成上升沿, 产生假时钟沿
+   *  破坏运行中的同步电路 (PC/计数器乱跳)。 */
   reevalAll() {
     this.version++;
     for (const ch of this.chips.values()) {
       const d = this.lib[ch.type];
+      if (d.rebase) d.rebase(ch, this.api(ch));
       if (d.gates || d.eval) this.evalChip(ch);
     }
     this.flush(this.SETTLE_CAP);
@@ -359,7 +364,7 @@ class Engine {
     if (!d) return;
     ch._evalQueued = false;
     if (!d.gates && !d.eval) return;
-    if (ch.powered === false) {
+    if (this.powered === false || ch.powered === false) {
       // 未上电: 输出脚强制 X (io 脚不驱动, 保持高阻不拖总线)
       for (const p of ch.pins) if (p.dir === 'out') this.drivePin(ch, p.num, VX);
       return;
@@ -459,7 +464,7 @@ class Engine {
 
   /** 主循环推进: dtUs 微秒真实增量(乘以速度倍率后的仿真增量) */
   advance(dtUs) {
-    if (!this.running) { this.flush(this.FRAME_CAP); return; }
+    if (!this.running || !this.powered) { this.flush(this.FRAME_CAP); return; }
     const target = this.simTime + dtUs;
     for (let guard = 0; guard < 2000000; guard++) {
       this.processQueue(target, this.FRAME_CAP);
@@ -483,6 +488,7 @@ class Engine {
 
   /** 步进: 翻转所有无稳态源半周期并结算, 返回触发的数量 */
   stepClocks() {
+    if (!this.powered) return 0;
     let fired = 0;
     for (const ch of this.chips.values()) {
       if (!this.lib[ch.type].osc || ch.powered === false) continue;
@@ -494,6 +500,34 @@ class Engine {
   }
 
   setRunning(b) { this.running = !!b; }
+
+  /* ---------------- 电源控制 (仿真菜单 开机/关机/重启) ----------------
+   * 关机 = 全部芯片断电: 输出脚强制 X / io 脚不再驱动, 时钟停振, 事件队列清空
+   *       (等效拔掉电源; RAM 内容、触发器状态、液晶屏面按器件物理特性保留残态)
+   * 开机 = 易失状态复位(等效上电复位): 触发器/计数器/移位寄存器清零,
+   *       RAM 清零 (易失), ROM/PROM/EEPROM 内容保持 (非易失),
+   *       液晶屏面清空等待程序初始化; 时钟源相位清零, 队列清空后重新扰动自启动 */
+  powerOff() {
+    if (!this.powered) return;
+    this.powered = false;
+    this.q.clear();   // 丢弃待决事件 (发送中的 PS/2 帧、脚本定时器链等)
+    this.reevalAll();
+  }
+
+  powerOn() {
+    this.q.clear();
+    this.powered = true;
+    for (const ch of this.chips.values()) {
+      const d = this.lib[ch.type];
+      if (d.volatile) ch.state = {};                    // 时序器件 (7474/74161/74374…): 状态清零
+      delete ch._ps2; ch._sTick = false;                // 主动型元件的运行期状态
+      if (d.mem && d.mem.kind === 'ram' && Array.isArray(ch.props.mem))
+        ch.props.mem.fill(0);                           // RAM 易失: 上电为 0
+      if (d.init) d.init(ch, this);
+      if (d.onPowerOn) d.onPowerOn(ch);                 // 元件自定义上电行为 (液晶清屏等)
+    }
+    this.reevalAll();
+  }
 
   /* ---------------- 序列化 ---------------- */
 

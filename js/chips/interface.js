@@ -432,6 +432,10 @@ def('LCD1602', '1602 字符液晶', '输入/输出', [
   detail: '1602 字符型液晶, 2 行 × 16 字符, HD44780 风格接口, 内置 GB2312 中文字库。\n引脚: 1 RS (1=数据/0=指令), 2 E (上升沿锁存), 3~10 D0~D7 为 8 位数据总线; 常用指令 0x01 清屏、0x80|n 设置显示地址。',
   custom: true, hideNums: true, size: { w: 224, h: 112 },
   init(ch) { lcdEnsureState(ch); },
+  onPowerOn(ch) {   // 上电: 屏面未初始化 (清空等待程序写入, 等效真实 HD44780 上电态)
+    ch.state.ddram = new Array(80).fill(' ');
+    ch.state.cur = 0; ch.state.pending = null; ch.state.prevE = 0;
+  },
   eval(ch, e) {
     lcdEnsureState(ch);
     const en = e.read(2);
@@ -497,6 +501,13 @@ def('LCD12864', '12864 图形液晶', '输入/输出', [
   detail: '12864 图形液晶, ST7920 风格: 文字层 4 行 × 16 字 (中文字库) + 图形层 128×64 点阵。\n引脚: 1 RS (1=数据/0=指令), 2 E (上升沿锁存), 3~10 D0~D7 为 8 位数据总线; 0x30 基本指令集写文字, 0x34/0x36 扩充指令集并可开图形层。',
   custom: true, hideNums: true, size: { w: 280, h: 168 },
   init(ch) { lcd12864Ensure(ch); },
+  onPowerOn(ch) {   // 上电: 文字/图形两层未初始化, 等待程序写入
+    ch.state.ddram = new Array(64).fill(' ');
+    ch.state.gdram = new Array(1024).fill(0);
+    ch.state.cur = 0; ch.state.pending = null; ch.state.prevE = 0;
+    ch.state.ext = false; ch.state.gOn = false;
+    ch.state.gStage = 0; ch.state.gy = 0; ch.state.gx = 0;
+  },
   eval(ch, e) {
     lcd12864Ensure(ch);
     const en = e.read(2);

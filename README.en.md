@@ -8,7 +8,7 @@ A pure front-end (zero-dependency) simulator for 74-series logic chip circuits, 
 - **🍞 Breadboard mode**: realistic breadboard view (60 columns, rows a–j, top & bottom power rails, 5 tied holes per column), **one-click auto-placement from the schematic with all jumper wires generated** (including power jumpers for every chip), per-hole/per-jumper editing (**at most one jumper per hole; holes occupied by chip pins can't take a jumper** — manual wiring enforces the same), **DIP chips only work once connected to the power rails**, circuit keeps simulating in real time
 - **🟩 PCB mode**: DIP footprint layout + ratsnest preview, **exports a PCB source file that EasyEDA (Standard edition) opens directly** — pads carry net names, so the ratsnest is there on open and you can run EasyEDA's auto-router right away; also exports a generic netlist JSON (for a future in-house router)
 
-![Breadboard mode: VM-8 CPU clock computer example (45 chips across three breadboards, 1602 LCD showing the live clock), ✨one-click auto-place & jumper routing](https://suulnnka.github.io/74vm/docs/screenshot-breadboard.png)
+![Breadboard mode: VM-8 CPU clock computer example (46 chips across three breadboards, 1602 LCD showing the live clock), ✨one-click auto-place & jumper routing](https://suulnnka.github.io/74vm/docs/screenshot-breadboard.png)
 
 ## Run
 
@@ -37,7 +37,8 @@ python -m http.server 8111
 - **12864 graphic LCD**: ST7920-style, text layer of 4 rows × 16 characters (GB2312 Chinese font) + 128×64-dot graphics layer overlaid; right-click to edit text / clear screen / clear graphics
 - **PS/2 test script**: keyboard right-click → edit test script (`type text` / `sleep ms` / `key name`, # comments); running it types automatically on beat — handy for testing
 - **Memory (ROM / RAM categories)**: ROM: 74187 ROM 256×4, 74S472 PROM 512×8 (right-click to edit contents, hex paste import / file export), AT28C64B EEPROM 8K×8, AT28C256 EEPROM 32K×8 (real DIP-28 pinout with power on pins 14/28; with /WE=0 it rewrites in-circuit like an SRAM, right-click to edit/export); RAM: 74189 RAM 16×4, 6116 SRAM 2K×8 (active-low /CS /WE /OE, bidirectional data bus, right-click snapshot/export), 6264 SRAM 8K×8 (real DIP-28 pinout, dual chip select — /CS1 active-low + CS2 active-high; floating = not selected, must be tied to VCC)
-- **Simulation engine**: event-driven with gate delays; supports feedback loops (latches/ring oscillators self-start), multi-driver conflicts, tri-state, oscillation detection
+- **Simulation engine**: event-driven with gate delays; supports feedback loops (latches/ring oscillators self-start), multi-driver conflicts, tri-state, oscillation detection. **The Simulate menu carries whole-circuit power controls — Power on / Power off / Restart**: off = every chip unpowered (outputs X/Z, clocks stop); on = power-on reset (sequential devices clear, RAM cleared, ROM/EEPROM kept, LCD cleared awaiting program init), restart = a power cycle; the program restarts from address 0
+- **VM-8 program library**: in the VM-8 CPU example, right-click the program ROM → **📥 Load VM-8 program** — five built-in programs (counter / welcome animation / typewriter / stopwatch / factory clock) are assembled, burned in, and cold-booted automatically; the teaching guide **[docs/vm8-guide.md](docs/vm8-guide.md)** explains how an 8-bit computer is built (ISA / microcode / RAM & ROM / ROM loading / IO wiring / boot flow)
 - **Breadboard mode**: per-hole connectivity model (column groups of 5 + full power rails), ✨auto-routing (generates jumpers net-by-net from the schematic: power nets use the rails as a star-shaped hub, signal nets chain along columns; **at most one jumper per hole — holes taken by chip pins/module legs get no jumper**; power nets automatically route along the rails, **and every DIP automatically gets VCC/GND → rail power jumpers**), power checks (see the rules below), DIPs straddle the center gap on their physical pins, R to flip, unplaced-parts tray; the 1602/12864 LCD modules get a raised screen showing live DDRAM text and GDRAM dots
 - **PCB mode**: 2.54mm-grid DIP/pin-header footprints, ratsnest, R to rotate, auto-layout, EasyEDA/netlist export
 - **Editing**: select/multi-select, move, rotate, duplicate (Ctrl+D), delete, undo/redo, context menus, right-click to edit labels; switch modes via the toolbar or keys 1/2/3
@@ -96,7 +97,7 @@ Known limitations: components export as loose pads + silkscreen (not grouped foo
 | 14 | PS/2 scan-code receiver (74164) | keyboard frame bits shift in serially, watch on an LED |
 | 15 | Keypad scanning (74138+7404) | column-by-column scan; holding a key lights the row LED |
 | 16 | 1602 LCD typewriter | toggle RS/D7~D0 + E buttons to hand-write instructions/characters |
-| 17 | VM-8 CPU clock computer | 8-bit microcoded CPU + 1602 clock display + PS/2 time setting + 1Hz real-time clock; a 248-byte clock program is burned into ROM (built-in assembler, editable); covered by `test/test-cpu.js` with 77 deep tests (microcode/assembler/instruction-level/keyboard capture/keeping-time integration/three modes) |
+| 17 | VM-8 CPU clock computer | 8-bit microcoded CPU + 1602 clock display + PS/2 time setting + 1Hz real-time clock; the circuit has a **power switch** (gates the clocks and holds reset = cold boot); the program ROM right-click offers **built-in programs** (counter / welcome / typewriter / stopwatch / factory clock); a 248-byte clock program is burned into ROM (built-in assembler, editable); teaching guide: [docs/vm8-guide.md](docs/vm8-guide.md); covered by `test/test-cpu.js` with 123 deep tests (microcode/assembler/instruction-level/keyboard capture/keeping-time integration/power control/program library/three modes) |
 
 ## File structure
 
@@ -112,9 +113,10 @@ js/examples.js    built-in example circuits
 js/i18n.js        i18n support (Chinese is the source language; initial language follows the browser locale: non-Chinese → English)
 js/i18n-en.js     English dictionary + help text
 js/app.js         rendering & interaction (three-mode views, drag/wire/jumper, undo, persistence)
+docs/vm8-guide.md VM-8 teaching guide (ISA/microcode/RAM & ROM/ROM loading/IO/boot flow)
 test/test-engine.js  engine tests (63 items)
-test/test-modes.js   mode tests (129 items: netlist equivalence/physical pin mapping/memory/power check/export formats)
-test/test-cpu.js     VM-8 CPU deep tests (77 items: microcode/assembler/instruction-level/keyboard capture/full integration/three modes)
+test/test-modes.js   mode tests (136 items: netlist equivalence/physical pin mapping/memory/power check/export formats)
+test/test-cpu.js     VM-8 CPU deep tests (123 items: microcode/assembler/instruction-level/keyboard capture/full integration/power control/program library/three modes)
 test/test-i18n.js    i18n tests (14 items: initial-language detection)
 ```
 
@@ -124,6 +126,6 @@ test/test-i18n.js    i18n tests (14 items: initial-language detection)
 node test/test-engine.js   # gate logic/latches/counters/adders/7-segment/tri-state/oscillator/serialization
 node test/test-examples.js # all 17 built-in examples verified in three modes
 node test/test-modes.js    # breadboard netlist equivalence (17 examples)/PCB footprints/EasyEDA export format
-node test/test-cpu.js      # VM-8 CPU: microcode/assembler/instruction-level/keyboard/clock program/three modes
+node test/test-cpu.js      # VM-8 CPU: microcode/assembler/instruction-level/keyboard/clock program/power control/program library/three modes
 node test/test-i18n.js     # i18n: initial-language detection (saved choice first, else browser locale)
 ```

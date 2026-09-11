@@ -204,6 +204,11 @@ def('7474', '双D触发器', '触发器/锁存', [
   R(13, '2~CLR', 'in'), R(12, '2D', 'in'), R(11, '2CK', 'in'), R(10, '2~PRE', 'in'), R(9, '2~Q', 'out'), R(8, '2Q', 'out'),
 ], {
   detail: '内含 2 个上升沿触发的 D 触发器。\n引脚: 每组 D 为数据、CK 为时钟 (上升沿存入), Q 与 ~Q 互补输出; ~PRE 异步置 1、~CLR 异步清 0, 均低有效 (不用时接高)。',
+  volatile: true,                                  // 全局开机: 状态清零 (见 engine.powerOn)
+  rebase(ch, e) {                                  // 边沿基线对齐当前电平 (防全量重评估产生假沿)
+    ch.state.pck0 = e.read(3) === V1 ? 1 : 0;
+    ch.state.pck1 = e.read(11) === V1 ? 1 : 0;
+  },
   eval(ch, e) {
     const s = ch.state;
     const G = [[1, 2, 3, 4, 5, 6], [13, 12, 11, 10, 8, 9]]; // [~CLR,D,CK,~PRE,Q,~Q]
@@ -233,6 +238,11 @@ def('7476', '双JK触发器', '触发器/锁存', [
   R(15, '2CK', 'in'), R(14, '2~PRE', 'in'), R(13, '2~CLR', 'in'), R(12, '2J', 'in'), R(11, '2K', 'in'), R(10, '2Q', 'out'), R(9, '2~Q', 'out'),
 ], {
   detail: '内含 2 个上升沿触发的 JK 触发器。\n引脚: 每组 J/K 为输入、CK 为时钟 (上升沿触发, J=K=1 时翻转), Q 与 ~Q 互补输出; ~PRE/~CLR 异步置 1/清 0 (低有效)。',
+  volatile: true,
+  rebase(ch, e) {
+    ch.state.pck0 = e.read(1) === V1 ? 1 : 0;
+    ch.state.pck1 = e.read(15) === V1 ? 1 : 0;
+  },
   eval(ch, e) {
     const s = ch.state;
     const G = [[1, 2, 3, 4, 5, 6, 7], [15, 14, 13, 12, 11, 10, 9]]; // [CK,~PRE,~CLR,J,K,Q,~Q]
@@ -267,6 +277,8 @@ def('74175', '四D触发器', '触发器/锁存', [
   R(15, 'D0', 'in'), R(14, 'D3', 'in'), R(13, 'Q3', 'out'), R(12, '~Q3', 'out'), R(11, 'D2', 'in'), R(10, 'Q2', 'out'), R(9, '~Q2', 'out'),
 ], {
   detail: '4 个上升沿 D 触发器, 时钟与清零公用。\n引脚: D0~D3 为数据输入, CK 上升沿统一锁存, ~CLR 低有效清零; 每位有 Q 与 ~Q 互补输出。',
+  volatile: true,
+  rebase(ch, e) { ch.state.pck = e.read(1) === V1 ? 1 : 0; },
   eval(ch, e) {
     const s = ch.state;
     const G = [[15, 3, 4], [5, 6, 7], [11, 10, 9], [14, 13, 12]]; // [D,Q,~Q]
@@ -294,6 +306,8 @@ def('74374', '八D触发器·三态', '触发器/锁存', [
   R(19, 'Q1', 'io'), R(18, 'Q2', 'io'), R(17, 'Q3', 'io'), R(16, 'Q4', 'io'), R(15, 'Q5', 'io'), R(14, 'Q6', 'io'), R(13, 'Q7', 'io'), R(12, 'Q8', 'io'), R(11, 'CK', 'in'),
 ], {
   detail: '8 个上升沿 D 触发器, 三态输出, 适合挂总线。\n引脚: D1~D8 为数据输入, CK 上升沿统一锁存; ~OE 输出使能 (低有效, 无效时 Q 呈高阻)。',
+  volatile: true,
+  rebase(ch, e) { ch.state.pck = e.read(11) === V1 ? 1 : 0; },
   eval(ch, e) {
     const s = ch.state;
     const D = [2, 3, 4, 5, 6, 7, 8, 9], Q = [19, 18, 17, 16, 15, 14, 13, 12];
@@ -318,6 +332,8 @@ def('74161', '4位二进制计数器', '计数/移位', [
   R(15, 'RCO', 'out'), R(14, 'QA', 'out'), R(13, 'QB', 'out'), R(12, 'QC', 'out'), R(11, 'QD', 'out'), R(10, 'ENT', 'in'), R(9, '~LOAD', 'in'),
 ], {
   detail: '4 位同步二进制计数器, 支持预置与级联。\n引脚: CK 上升沿计数, A~D 为预置数据, ~LOAD 同步置数、~CLR 异步清零 (均低有效); ENP/ENT 为计数使能, QA~QD 输出, RCO 为进位输出 (计到 15 且 ENT=1 时为 1)。',
+  volatile: true,
+  rebase(ch, e) { ch.state.pck = e.read(2) === V1 ? 1 : 0; },
   eval(ch, e) {
     const s = ch.state;
     if (s.cnt == null) s.cnt = 0;
@@ -354,6 +370,8 @@ def('74164', '8位移位寄存器', '计数/移位', [
   R(13, '~CLR', 'in'), R(12, 'Q7', 'out'), R(11, 'Q6', 'out'), R(10, 'Q5', 'out'), R(9, 'Q4', 'out'), R(8, 'CK', 'in'),
 ], {
   detail: '8 位串入并出移位寄存器。\n引脚: A、B 相与后为串行输入, CK 上升沿移位, ~CLR 低有效清零; Q0~Q7 为并行输出 (Q0 为最新移入位)。',
+  volatile: true,
+  rebase(ch, e) { ch.state.pck = e.read(8) === V1 ? 1 : 0; },
   eval(ch, e) {
     const s = ch.state;
     if (s.v == null) { s.v = 0; s.x = 0; }
@@ -389,6 +407,11 @@ def('74595', '8位移位锁存器', '计数/移位', [
   R(15, 'Q0', 'io'), R(14, 'DS', 'in'), R(13, '~OE', 'in'), R(12, 'ST_CP', 'in'), R(11, 'SH_CP', 'in'), R(10, '~MR', 'in'), R(9, "Q7'", 'out'),
 ], {
   detail: "8 位移位寄存器 + 输出锁存 (三态), 常用于 IO 扩展与级联。\n引脚: DS 串行输入, SH_CP 上升沿移位, ST_CP 上升沿把移位内容送到输出, ~OE 低有效使能输出, ~MR 低有效复位; Q0~Q7 并行输出, Q7' 供级联。",
+  volatile: true,
+  rebase(ch, e) {
+    ch.state.psh = e.read(11) === V1 ? 1 : 0;
+    ch.state.pst = e.read(12) === V1 ? 1 : 0;
+  },
   eval(ch, e) {
     const s = ch.state;
     if (s.sv == null) { s.sv = 0; s.sx = 0; s.lv = 0; s.lx = 0; }

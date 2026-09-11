@@ -188,6 +188,7 @@ syncRun();
   let data = null;
   try { data = JSON.parse(localStorage.getItem('74vm:autosave')); } catch (e) { /* 忽略 */ }
   if (data && Array.isArray(data.chips) && data.chips.length) {
+    if (data.view) delete data.view.mode;   // 启动固定从原理图模式开始 (各模式相机仍按存档恢复, 导入 JSON 不受影响)
     restoreSave(data);
     if (!(data.view && data.view.cams)) fitView();   // 有保存的视图则不重新适配
     toast(t('已恢复上次的电路 (文件菜单可新建)'));

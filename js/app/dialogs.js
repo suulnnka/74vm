@@ -53,6 +53,26 @@ function memCfg(ch) { return LIB[ch.type] && LIB[ch.type].mem; }
 function memChipName(ch) {
   return ch.props.label ? ch.props.label : ch.type + '#' + ch.id;
 }
+/** VM-8 程序 ROM (示例中 tag=vm8-program 的 74S472): 载入内置程序并冷启动 */
+function loadVm8Program(ch) {
+  const progs = (window.VM8 && window.VM8.PROGS) || [];
+  if (!progs.length) return;
+  Dialog.pick({
+    title: tf('载入 VM-8 程序 — {n}', { n: memChipName(ch) }),
+    message: t('选择烧入程序 ROM 的程序, 写入后自动冷启动 (PC=0 从头执行):'),
+    options: progs.map(p => ({ label: t(p.name), hint: t(p.desc) })),
+  }).then(idx => {
+    if (idx == null) return;
+    const p = progs[idx];
+    pushUndo();
+    ch.props.mem = p.mem.slice();
+    sim.touch();
+    if (sim.powered) { sim.powerOff(); sim.powerOn(); }   // 冷启动: 易失状态复位, 程序从头跑
+    else sim.reevalAll();
+    scheduleSave();
+    toast(tf('已烧入「{n}」并冷启动', { n: t(p.name) }));
+  });
+}
 function editMem(ch) {
   const m = memCfg(ch);
   Dialog.prompt({
@@ -201,10 +221,15 @@ function memoryMenuItems(ch) {
   ];
   const m = memCfg(ch);
   if (!m) return [];
-  if (m.kind === 'rom') return [
-    { text: t('编辑内容 (十六进制)…'), fn: () => editMem(ch) },
-    { text: t('导出内容 (十六进制文件)'), fn: () => exportMem(ch) },
-  ];
+  if (m.kind === 'rom') {
+    const items = [];
+    if (ch.props.tag === 'vm8-program')
+      items.push({ text: t('📥 载入 VM-8 程序…'), fn: () => loadVm8Program(ch) });
+    items.push(
+      { text: t('编辑内容 (十六进制)…'), fn: () => editMem(ch) },
+      { text: t('导出内容 (十六进制文件)'), fn: () => exportMem(ch) });
+    return items;
+  }
   return [
     { text: t('获取快照 (十六进制)…'), fn: () => memSnapshot(ch) },
     { text: t('导出快照 (十六进制文件)'), fn: () => exportMem(ch) },
@@ -246,7 +271,7 @@ function editLabelOrFreq(ch) {
 
 window.APP.dlg = {
   editLabel, editLabelOrFreq, memoryMenuItems, showDesc,
-  editMem, memSnapshot, exportMem,
+  editMem, memSnapshot, exportMem, loadVm8Program,
   editLcdText, editLcd12864Text, clearLcd, clearLcd12864Gfx,
   copyLcdText, exportLcdText,
 };
