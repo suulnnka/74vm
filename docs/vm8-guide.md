@@ -254,6 +254,7 @@ VM-8 示例的程序 ROM 带 `vm8-program` 标签, 右键它有三个入口:
    选择后立即烧入 `props.mem` 并**自动冷启动**(等效重新上电, PC=0 从头执行)。程序以汇编源码随库存放,
    烧入前经内置汇编器汇编;
 2. **编辑内容 (十六进制)…** — 直接粘贴/编辑 512 字节的十六进制(每行 16 字节), 适合对照手写机器码教学;
+   VM-8 程序 ROM 写入后同样**自动冷启动** —— 把第 9 节任何一段十六进制整块粘贴进来即可运行;
 3. **导出内容 (十六进制文件)** — 把当前 ROM 内容存成 `.prom.hex` 文件, 可分享、可再用粘贴导入。
 
 > 其他电路中的任意 ROM/EEPROM(74187/74S472/AT28C64B/AT28C256)同样支持 2、3 两个通用入口;
@@ -348,9 +349,16 @@ VM-8 有**两级电源控制**, 对应真实计算机的两个层次:
 
 ---
 
-## 9. 内置程序库
+## 9. 内置程序库(源码 + 可直接烧入的十六进制)
 
-全部程序只用第 3 节的 16 条指令, 源码就在 `js/examples.js`(烧入后亦可右键 ROM 看十六进制)。难度递进:
+全部程序只用第 3 节的 16 条指令。每个程序给出两份东西:
+
+- **汇编源码**(带注释, 供阅读与修改; 与 `js/examples.js` 内置源码一致);
+- **机器码十六进制**(与源码逐字节对应)—— **整块复制** → 右键程序 ROM → **编辑内容 (十六进制)…** → 粘贴 → 写入。
+  未粘贴的部分自动补 `00`(= NOP); VM-8 程序 ROM 写入后会**自动冷启动**, 粘贴完程序立刻从头执行。
+
+> 更省事的入口: 右键程序 ROM → **📥 载入 VM-8 程序…**, 内置这 5 个程序一键烧入。
+> 两种方式烧录的内容完全一致。
 
 ### 9.1 计数器 (70 字节) — "Hello World"
 
@@ -399,9 +407,64 @@ SHOW:   LDI 0x80        ; 光标回 (0,0)
         JMP LOOP
 ```
 
+```hex
+10 01 90 10 00 30 10 30 11 A0 37 E0 60 01 B0 16
+60 03 B0 16 A0 0B F8 20 10 40 01 60 0A B0 23 30
+10 A0 37 10 00 30 10 20 11 40 01 60 06 B0 33 30
+11 A0 37 10 00 30 11 10 80 90 20 11 40 30 80 20
+10 40 30 80 A0 0B
+```
+
 ### 9.2 迎宾动画 (57 字节) — 最小程序之一
 
 逐字打出「你好 74VM-8!」(GB2312 中文 = 连续写两个 ≥0x80 的字节), 然后轮询**键标志**: 按任意键(取走并判非 break 码 0xF0)清屏重播。
+
+```asm
+START:  LDI 0x01        ; 清屏
+        CMD
+        LDI 0xC4        ; 「你」 GB2312 首字节 (液晶自动配对双字节)
+        OUT
+        LDI 0xE3        ; 「你」 次字节
+        OUT
+        LDI 0xBA        ; 「好」 首字节
+        OUT
+        LDI 0xC3        ; 「好」 次字节
+        OUT
+        LDI 0x20        ; 空格
+        OUT
+        LDI 0x37        ; 7
+        OUT
+        LDI 0x34        ; 4
+        OUT
+        LDI 0x56        ; V
+        OUT
+        LDI 0x4D        ; M
+        OUT
+        LDI 0x2D        ; -
+        OUT
+        LDI 0x38        ; 8
+        OUT
+        LDI 0x21        ; !
+        OUT
+WAIT:   TCK
+        CPI 0           ; 无事件: 继续等
+        JZ WAIT
+        CPI 1           ; 只有秒脉冲: 忽略
+        JZ WAIT
+        CLT             ; 秒+键同拍时顺带清秒标志
+        KBD             ; 读走键码并清键标志
+        CLF
+        CPI 0xF0        ; break (松开): 忽略
+        JZ WAIT
+        JMP START       ; 任意按键 → 重播
+```
+
+```hex
+10 01 90 10 C4 80 10 E3 80 10 BA 80 10 C3 80 10
+20 80 10 37 80 10 34 80 10 56 80 10 4D 80 10 2D
+80 10 38 80 10 21 80 E0 60 00 B0 27 60 01 B0 27
+F8 D0 F0 60 F0 B0 27 A0 00
+```
 
 ### 9.3 打字机 (139 字节)
 
@@ -409,14 +472,250 @@ SHOW:   LDI 0x80        ; 光标回 (0,0)
 **它同时是一面镜子**: 每个键要 `CPI+JZ` 两查一跳(7 字节/键), 26 个字母就装不下了 —— **没有变址寻址/查表指令的 ISA 表达力就这么大**。
 这正是真实 CPU 演化出间接寻址、CALL/RET、中断向量表的动力, 见练习 4。
 
+```asm
+        LDI 0x01        ; 清屏
+        CMD
+MAIN:   TCK
+        CPI 2           ; 新按键?
+        JZ KEY
+        CPI 3
+        JZ KEY
+        JMP MAIN
+KEY:    KBD             ; A = 扫描码
+        CLF             ; 清键标志 (应答)
+        CPI 0xF0        ; break 前缀: 丢弃
+        JZ MAIN
+        CPI 0x76        ; Esc → 清屏
+        JZ CLEAR
+        CPI 0x5A        ; Enter → 换行
+        JZ NEWLN
+        CPI 0x29        ; 空格
+        JZ SPACE
+        CPI 0x45        ; 0  (以下每键: 比对扫描码 → 跳到打出字符)
+        JZ D0
+        CPI 0x46        ; 9
+        JZ D9
+        CPI 0x16        ; 1
+        JZ D1
+        CPI 0x1E        ; 2
+        JZ D2
+        CPI 0x26        ; 3
+        JZ D3
+        CPI 0x25        ; 4
+        JZ D4
+        CPI 0x2E        ; 5
+        JZ D5
+        CPI 0x36        ; 6
+        JZ D6
+        CPI 0x3D        ; 7
+        JZ D7
+        CPI 0x3E        ; 8
+        JZ D8
+        JMP MAIN        ; 其他键不认 (映射表思想的局限)
+CLEAR:  LDI 0x01
+        CMD
+        JMP MAIN
+NEWLN:  LDI 0xC0        ; 0x80|0x40 = 第 2 行行首
+        CMD
+        JMP MAIN
+SPACE:  LDI 0x20
+        OUT
+        JMP MAIN
+D0:     LDI 48          ; '0'
+        OUT
+        JMP MAIN
+D1:     LDI 49
+        OUT
+        JMP MAIN
+D2:     LDI 50
+        OUT
+        JMP MAIN
+D3:     LDI 51
+        OUT
+        JMP MAIN
+D4:     LDI 52
+        OUT
+        JMP MAIN
+D5:     LDI 53
+        OUT
+        JMP MAIN
+D6:     LDI 54
+        OUT
+        JMP MAIN
+D7:     LDI 55
+        OUT
+        JMP MAIN
+D8:     LDI 56
+        OUT
+        JMP MAIN
+D9:     LDI 57
+        OUT
+        JMP MAIN
+```
+
+```hex
+10 01 90 E0 60 02 B0 0E 60 03 B0 0E A0 03 D0 F0
+60 F0 B0 03 60 76 B0 4A 60 5A B0 4F 60 29 B0 54
+60 45 B0 59 60 46 B0 86 60 16 B0 5E 60 1E B0 63
+60 26 B0 68 60 25 B0 6D 60 2E B0 72 60 36 B0 77
+60 3D B0 7C 60 3E B0 81 A0 03 10 01 90 A0 03 10
+C0 90 A0 03 10 20 80 A0 03 10 30 80 A0 03 10 31
+80 A0 03 10 32 80 A0 03 10 33 80 A0 03 10 34 80
+A0 03 10 35 80 A0 03 10 36 80 A0 03 10 37 80 A0
+03 10 38 80 A0 03 10 39 80 A0 03
+```
+
 ### 9.4 秒表 (181 字节)
 
 显示 `MM:SS`, 空格=启动/暂停, C=清零。在计数器之上引入一个**状态变量** `RUN`(0x10): 每秒 tick 到来时先看 RUN 是否为 1 —— 用 RAM 中的一个字节存"机器状态", 这就是最朴素的状态机。
+
+```asm
+RUN   = 0x10         ; 1=计时中, 0=暂停
+SEC1  = 0x11
+SEC10 = 0x12
+MIN1  = 0x13
+MIN10 = 0x14
+        LDI 0x01     ; 清屏
+        CMD
+        LDI 1        ; 上电即开始计时
+        STA RUN
+        LDI 0
+        STA SEC1
+        STA SEC10
+        STA MIN1
+        STA MIN10
+        JMP SHOW
+MAIN:   TCK
+        CPI 1        ; 秒脉冲?
+        JZ TICK
+        CPI 3        ; 秒+键同拍: 先走秒
+        JZ TICK
+        CPI 2        ; 新按键?
+        JZ KEY
+        JMP MAIN
+TICK:   CLT          ; 应答: 清秒标志
+        LDA RUN
+        CPI 1        ; 暂停中则不计秒
+        JZ ADDSEC
+        JMP MAIN
+ADDSEC: LDA SEC1     ; 秒 +1 (BCD 进位链 → 分)
+        ADI 1
+        CPI 10
+        JZ TS1
+        STA SEC1
+        JMP SHOW
+TS1:    LDI 0
+        STA SEC1
+        LDA SEC10
+        ADI 1
+        CPI 6
+        JZ TS10
+        STA SEC10
+        JMP SHOW
+TS10:   LDI 0
+        STA SEC10
+        LDA MIN1
+        ADI 1
+        CPI 10
+        JZ TM1
+        STA MIN1
+        JMP SHOW
+TM1:    LDI 0
+        STA MIN1
+        LDA MIN10
+        ADI 1
+        CPI 10
+        JZ TM10
+        STA MIN10
+        JMP SHOW
+TM10:   LDI 0
+        STA MIN10    ; 99:59 → 00:00
+        JMP SHOW
+KEY:    KBD          ; A = 扫描码
+        CLF
+        CPI 0xF0     ; break: 丢弃
+        JZ MAIN
+        CPI 0x29     ; 空格: 启动/暂停切换
+        JZ TGL
+        CPI 0x21     ; C: 清零 (不清 RUN)
+        JZ RST
+        JMP MAIN
+TGL:    LDA RUN
+        CPI 1
+        JZ PAUSE
+        LDI 1        ; 恢复计时
+        STA RUN
+        JMP MAIN
+PAUSE:  LDI 0        ; 暂停
+        STA RUN
+        JMP MAIN
+RST:    LDI 0        ; 时间清零
+        STA SEC1
+        STA SEC10
+        STA MIN1
+        STA MIN10
+SHOW:   LDI 0x80     ; 刷新 MM:SS
+        CMD
+        LDA MIN10
+        ADI 48
+        OUT
+        LDA MIN1
+        ADI 48
+        OUT
+        LDI 0x3A     ; ":"
+        OUT
+        LDA SEC10
+        ADI 48
+        OUT
+        LDA SEC1
+        ADI 48
+        OUT
+        JMP MAIN
+```
+
+```hex
+10 01 90 10 01 30 10 10 00 30 11 30 12 30 13 30
+14 A0 99 E0 60 01 B0 22 60 03 B0 22 60 02 B0 6D
+A0 13 F8 20 10 60 01 B0 2B A0 13 20 11 40 01 60
+0A B0 37 30 11 A0 99 10 00 30 11 20 12 40 01 60
+06 B0 47 30 12 A0 99 10 00 30 12 20 13 40 01 60
+0A B0 57 30 13 A0 99 10 00 30 13 20 14 40 01 60
+0A B0 67 30 14 A0 99 10 00 30 14 A0 99 D0 F0 60
+F0 B0 13 60 29 B0 7D 60 21 B0 8F A0 13 20 10 60
+01 B0 89 10 01 30 10 A0 13 10 00 30 10 A0 13 10
+00 30 11 30 12 30 13 30 14 10 80 90 20 14 40 30
+80 20 13 40 30 80 10 3A 80 20 12 40 30 80 20 11
+40 30 80 A0 13
+```
 
 ### 9.5 出厂时钟程序 (248 字节) — 综合应用
 
 示例默认烧录的程序: 1602 显示 `HH:MM:SS` 走时, PS/2 键 A=时+1、C=秒清零。RAM `0x10~0x15` 存 6 个 BCD 位,
 主循环 = `TCK 轮询 → 事件分派(秒tick/新键) → BCD 进位 → 刷新显示`。配套 `test/test-cpu.js` 123 项自动化测试。
+(完整带注释源码约 120 行, 见 `js/examples.js` 的 `VM8_PROG`; 这里给出机器码。)
+
+```hex
+10 01 90 10 00 30 10 30 11 30 12 30 13 30 14 30
+15 A0 CF E0 60 00 B0 13 60 01 B0 62 D0 F0 60 F0
+B0 13 60 1C B0 34 60 21 B0 2C A0 13 10 00 30 10
+30 11 A0 CF 20 14 40 01 60 0A B0 40 30 14 A0 4A
+10 00 30 14 20 15 40 01 30 15 20 15 60 02 B0 52
+A0 CF 20 14 60 04 B0 5A A0 CF 10 00 30 15 30 14
+A0 CF F8 20 10 40 01 60 0A B0 6F 30 10 A0 CF 10
+00 30 10 20 11 40 01 60 06 B0 7F 30 11 A0 CF 10
+00 30 11 20 12 40 01 60 0A B0 8F 30 12 A0 CF 10
+00 30 12 20 13 40 01 60 06 B0 9F 30 13 A0 CF 10
+00 30 13 20 14 40 01 60 0A B0 AF 30 14 A0 CF 10
+00 30 14 20 15 40 01 30 15 20 15 60 02 B0 C1 A0
+CF 20 14 60 04 B0 C9 A0 CF 10 00 30 15 30 14 10
+80 90 20 15 40 30 80 20 14 40 30 80 10 3A 80 20
+13 40 30 80 20 12 40 30 80 10 3A 80 20 11 40 30
+80 20 10 40 30 80 A0 13
+```
+
+> **校验一致性**: 本节十六进制全部由内置汇编器对上文源码汇编生成, 并有自动化测试保证
+> (`test/test-cpu.js` 第十二节: 反汇编扫描合法 + 与内置程序库逐字节一致)。
+
 
 ---
 

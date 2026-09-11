@@ -621,6 +621,21 @@ console.log('\n[十二] 内置程序库 (' + VM8.PROGS.length + ' 个程序)');
     sim2.advance(1300000);
     check('loadCpu(程序源码) 等价路径: 1.3s → 01', lcdText(sim2) === '01', lcdText(sim2));
   }
+  // 教学文档的十六进制与程序库保持同步 (docs/vm8-guide.md 第 9 节, 供粘贴进 ROM)
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const md = fs.readFileSync(path.join(__dirname, '..', 'docs', 'vm8-guide.md'), 'utf8');
+    const blocks = [...md.matchAll(/```hex\n([\s\S]*?)```/g)]
+      .map(m => m[1].trim().split(/\s+/).filter(Boolean).map(s => parseInt(s, 16)));
+    check('vm8-guide.md 含 5 段程序十六进制', blocks.length === VM8.PROGS.length, blocks.length);
+    VM8.PROGS.forEach((p, i) => {
+      const hex = blocks[i] || [];
+      check('vm8-guide.md hex ↔ ' + p.id + ' 逐字节一致',
+        hex.length === p.size && p.mem.slice(0, p.size).every((v, j) => hex[j] === v),
+        [hex.length, p.size]);
+    });
+  }
 }
 
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败');

@@ -88,8 +88,11 @@ function editMem(ch) {
     ch.props.mem = parseHexMem(s, m.size, m.mask);
     sim.touch();
     sim.reevalAll();   // 内容变化不经过引脚事件, 需重评估全部元件
+    // VM-8 程序 ROM: 粘贴新程序后冷启动, 保证从 0000H 干净地执行 (与"载入程序"一致)
+    if (ch.props.tag === 'vm8-program' && sim.powered) { sim.powerOff(); sim.powerOn(); }
     scheduleSave();
-    toast(tf('{t} 内容已写入', { t: ch.type }));
+    toast(tf('{t} 内容已写入', { t: ch.type }) +
+      (ch.props.tag === 'vm8-program' ? t(' — 已冷启动') : ''));
   });
 }
 function memSnapshot(ch) {
