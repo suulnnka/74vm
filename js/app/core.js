@@ -51,6 +51,8 @@ const app = {
   redoStack: [],
   libShown: true,
   bbLabels: true,   // 面包板元件标识 (关=悬停显示)
+  bbJumpers: true,  // 面包板跳线显示 (关=隐藏, 隐藏时也不可交互)
+  levelColor: true, // 电平着色 (关=所有模式下引脚/导线/跳线单色显示)
   dnd: null,   // 原生拖放状态 {type, x, y}
   kbChip: null,   // PS/2 键盘聚焦的元件 (打字 → 扫描码)
 };
@@ -169,6 +171,7 @@ function kb44CellAtBB(ch, w) {
 
 const COL = {
   v1: '#0f9d58', v0: '#78909c', vx: '#ef6c00', vz: '#9aa4ad',
+  flat: '#78909c',
   body: '#ffffff', bodyBorder: '#8fa1b3', head: '#1f2937', sub: '#5f7183',
   sel: '#0288d1', pinStroke: '#3e4c59', label: '#0277bd',
 };
@@ -176,6 +179,16 @@ function valColor(v) {
   return v === 1 ? COL.v1 : v === 0 ? COL.v0 : v === 'X' ? COL.vx : COL.vz;
 }
 const pinValue = pin => sim.pinDisplay(pin);
+/** 连接元素 (引脚/导线/孔位/跳线) 着色: 电平着色关闭时全部单色 (视图菜单) */
+function connColor(v) {
+  return app.levelColor ? valColor(v) : COL.flat;
+}
+/** 电平着色开关 (所有模式生效), 状态持久化 */
+function setLevelColor(v) {
+  app.levelColor = !!v;
+  try { localStorage.setItem('74vm:levcolor', app.levelColor ? '1' : '0'); } catch (e) { }
+  Menus.refresh();
+}
 
 /* ================= 坐标变换 ================= */
 
@@ -617,7 +630,7 @@ window.APP = {
   sim, app, LIB, canvas, ctx, holder, tooltipEl, ctxMenu,
   t, tf, PIN_GAP, DEFAULT_W, DPR, COL, CURSORS, ZOOM_LIM, KB44_CELL, KB44_GAP, KB44_GLYPH, LS_KEY,
   snap, rr, evenCells, chipSize, rotXY, pinLocal, pinWorld, pinNormal, chipHalf, chipPointLocal,
-  kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
+  kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, connColor, pinValue, setLevelColor, toWorld, resizeCanvas,
   isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
   buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
   showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,

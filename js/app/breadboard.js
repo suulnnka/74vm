@@ -8,7 +8,7 @@
     sim, app, LIB, canvas, ctx, holder, tooltipEl, ctxMenu,
     t, tf, PIN_GAP, DEFAULT_W, DPR, COL, CURSORS, ZOOM_LIM, KB44_CELL, KB44_GAP, KB44_GLYPH, LS_KEY,
     snap, rr, evenCells, chipSize, rotXY, pinLocal, pinWorld, pinNormal, chipHalf, chipPointLocal,
-    kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
+    kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, connColor, pinValue, toWorld, resizeCanvas,
     isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
     showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
@@ -43,6 +43,14 @@ function bbSanitize() {
 function setBBLabels(v) {
   app.bbLabels = !!v;
   try { localStorage.setItem('74vm:labels', app.bbLabels ? '1' : '0'); } catch (e) { }
+  Menus.refresh();
+}
+
+/** 跳线显示开关 (关=隐藏; 隐藏时跳线同样不可命中/拖动) */
+function setBBJumpers(v) {
+  app.bbJumpers = !!v;
+  if (!app.bbJumpers) app.bbWiring = null;   // 隐藏时结束进行中的拉线
+  try { localStorage.setItem('74vm:jumpers', app.bbJumpers ? '1' : '0'); } catch (e) { }
   Menus.refresh();
 }
 
@@ -145,6 +153,7 @@ function bbChipAt(w) {
 }
 
 function bbJumperAt(w) {
+  if (!app.bbJumpers) return null;   // 隐藏时跳线不可交互
   const th = 7;
   for (const j of app.bb.jumpers) {
     const a = BB.holePos(j.a), b = BB.holePos(j.b);
@@ -318,8 +327,8 @@ function bbPointerDown(e) {
   }
   const h = bbHoleAt(w);
   if (h) {
-    // 该孔只接一根跳线 → 拖动该跳线此端; 否则新建跳线
-    const attached = app.bb.jumpers.filter(j => j.a === h || j.b === h);
+    // 该孔只接一根跳线 → 拖动该跳线此端; 否则新建跳线 (跳线隐藏时一律新建)
+    const attached = app.bbJumpers ? app.bb.jumpers.filter(j => j.a === h || j.b === h) : [];
     if (attached.length === 1) {
       app.bbWiring = { hole: h, cursor: w, moveJumper: attached[0], moveEndIsA: attached[0].a === h };
     } else {
@@ -547,9 +556,9 @@ function drawBreadboard(z) {
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.fillText('BOARD ' + (b + 1), B.BOARD.x + 6, oy + B.BOARD.y + 3);
     }
-    // 中央沟道 (加宽: DIP 机体上下加宽后仍嵌入槽位)
+    // 中央沟道 (窄条: 真实面包板比例, DIP 机体直接跨压在沟道上)
     ctx.fillStyle = '#c4bda2';
-    rr(B.colX(1) - 10, oy + B.CHANNEL_Y - 14, B.colX(cols) - B.colX(1) + 20, 28, 8);
+    rr(B.colX(1) - 10, oy + B.CHANNEL_Y - 9, B.colX(cols) - B.colX(1) + 20, 18, 6);
     ctx.fill();
     // 电源轨
     ctx.font = 'bold 11px Consolas, monospace';
@@ -584,7 +593,7 @@ function drawBreadboard(z) {
         const pol = bbHolePol(key);
         ctx.beginPath();
         ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2);
-        ctx.fillStyle = v != null ? valColor(v) : polColor(pol, '#3a3f45');
+        ctx.fillStyle = v != null ? connColor(v) : polColor(pol, '#3a3f45');
         ctx.fill();
         if (v != null || pol) { ctx.strokeStyle = '#1a1d20'; ctx.lineWidth = 1; ctx.stroke(); }
       }
@@ -597,7 +606,7 @@ function drawBreadboard(z) {
         const pol = bbHolePol(key);
         ctx.beginPath();
         ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2);
-        ctx.fillStyle = v != null ? valColor(v) : polColor(pol, '#3a3f45');
+        ctx.fillStyle = v != null ? connColor(v) : polColor(pol, '#3a3f45');
         ctx.fill();
         if (v == null && !pol) { ctx.strokeStyle = r.color + '60'; ctx.lineWidth = 1; ctx.stroke(); }
       }
@@ -609,9 +618,10 @@ function drawBreadboard(z) {
     if (!ch.bb) continue;
     drawBBChip(ch, z);
   }
-  // 跳线 (绘制在元件之上)
+  // 跳线 (绘制在元件之上; 视图菜单可隐藏)
   const movingJumper = app.bbWiring && app.bbWiring.moveJumper;
   for (const j of app.bb.jumpers) {
+    if (!app.bbJumpers) continue;       // 隐藏跳线
     if (j === movingJumper) continue;   // 拖动端点的跳线在预览中绘制
     const a = B.holePos(j.a), b = B.holePos(j.b);
     if (!a || !b) continue;
@@ -633,7 +643,7 @@ function drawBreadboard(z) {
       ctx.quadraticCurveTo(cx, cy, b.x, b.y);
       ctx.stroke();
     }
-    ctx.strokeStyle = v != null ? valColor(v) : polColor(bbHolePol(j.a), '#9aa4b0');
+    ctx.strokeStyle = v != null ? connColor(v) : polColor(bbHolePol(j.a), '#9aa4b0');
     ctx.lineWidth = 2.6;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
@@ -1000,7 +1010,7 @@ window.APP.bb = {
   pointerDown: bbPointerDown, pointerMove: bbPointerMove, pointerUp: bbPointerUp,
   contextMenu: bbContextMenu,
   autoAll: bbAutoAll, apply: applyBB, sanitize: bbSanitize, fit: fitBreadboard,
-  setLabels: setBBLabels, unplace: bbUnplace,
+  setLabels: setBBLabels, setJumpers: setBBJumpers, unplace: bbUnplace,
   deleteSelection: bbDeleteSelection, rotateSelection: bbRotateSelection,
   placeChipBB, drawTray,
 };

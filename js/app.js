@@ -177,6 +177,8 @@ window.addEventListener('beforeunload', () => doSave(true));
 Menus.build();
 setLibShown(localStorage.getItem('74vm:lib') !== '0');   // 侧栏初始状态
 try { app.bbLabels = localStorage.getItem('74vm:labels') !== '0'; } catch (e) { app.bbLabels = true; }   // 面包板标识默认显示
+try { app.bbJumpers = localStorage.getItem('74vm:jumpers') !== '0'; } catch (e) { app.bbJumpers = true; }   // 面包板跳线默认显示
+try { app.levelColor = localStorage.getItem('74vm:levcolor') !== '0'; } catch (e) { app.levelColor = true; }   // 电平着色默认开启
 
 buildLib('');
 applyLang();   // 应用持久化的界面语言 (标题/搜索框/帮助/菜单栏)

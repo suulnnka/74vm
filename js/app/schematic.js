@@ -8,7 +8,7 @@
     sim, app, LIB, canvas, ctx, holder, tooltipEl, ctxMenu,
     t, tf, PIN_GAP, DEFAULT_W, DPR, COL, CURSORS, ZOOM_LIM, KB44_CELL, KB44_GAP, KB44_GLYPH, LS_KEY,
     snap, rr, evenCells, chipSize, rotXY, pinLocal, pinWorld, pinNormal, chipHalf, chipPointLocal,
-    kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
+    kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, connColor, pinValue, toWorld, resizeCanvas,
     isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
     showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
@@ -80,9 +80,9 @@ function drawWires() {
       ctx.stroke();
     }
     wirePath(e);
-    ctx.strokeStyle = valColor(v);
-    ctx.lineWidth = v === 1 ? 2.6 : 2;
-    if (v === 'Z') ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = connColor(v);
+    ctx.lineWidth = app.levelColor && v === 1 ? 2.6 : 2;
+    if (app.levelColor && v === 'Z') ctx.setLineDash([5, 4]);
     else ctx.setLineDash([]);
     ctx.stroke();
     ctx.setLineDash([]);
@@ -162,7 +162,7 @@ function drawPins(ch, def, z) {
     }
     ctx.beginPath();
     ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
-    ctx.fillStyle = valColor(v);
+    ctx.fillStyle = connColor(v);
     ctx.fill();
     ctx.strokeStyle = COL.pinStroke;
     ctx.lineWidth = 1.2;

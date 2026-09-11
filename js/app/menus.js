@@ -11,11 +11,11 @@
     kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
     isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
-    showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus,
+    showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus, setLevelColor,
     switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
     fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   } = window.APP;
-  const { autoAll: bbAutoAll, apply: applyBB, sanitize: bbSanitize, fit: fitBreadboard, setLabels: setBBLabels } = APP.bb;
+  const { autoAll: bbAutoAll, apply: applyBB, sanitize: bbSanitize, fit: fitBreadboard, setLabels: setBBLabels, setJumpers: setBBJumpers } = APP.bb;
   const { fit: fitPCB } = APP.pcb;
   const { fitView, duplicateSelection } = APP.schem;
   const { build: buildLib, setShown: setLibShown, toggle: toggleLib } = APP.lib;
@@ -141,6 +141,8 @@ const Menus = {
         { label: t('适配视图'), act: fitDispatch },
         { label: t('元件库'), hint: t('侧栏'), radio: 'lib', act: toggleLib },
         { label: t('元件标识 (面包板)'), hint: t('关=悬停显示'), radio: 'labels', act: () => setBBLabels(!app.bbLabels) },
+        { label: t('跳线 (面包板)'), hint: t('关=隐藏'), radio: 'jumpers', act: () => setBBJumpers(!app.bbJumpers) },
+        { label: t('按电平着色'), hint: t('关=引脚/跳线单色'), radio: 'levelColor', act: () => setLevelColor(!app.levelColor) },
         { sep: true },
         { label: t('原理图模式'), hint: '1', radio: 'mode', val: 'schematic', act: () => switchMode('schematic') },
         { label: t('面包板模式'), hint: '2', radio: 'mode', val: 'breadboard', act: () => switchMode('breadboard') },
@@ -181,6 +183,8 @@ const Menus = {
     if (it.radio === 'speed') return app.speed === it.val;
     if (it.radio === 'lib') return app.libShown;
     if (it.radio === 'labels') return app.bbLabels;
+    if (it.radio === 'jumpers') return app.bbJumpers;
+    if (it.radio === 'levelColor') return app.levelColor;
     if (it.radio === 'lang') return I18N.lang === it.val;
     return false;
   },

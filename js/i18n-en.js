@@ -328,6 +328,10 @@ window.I18N_EN = {
   '侧栏': 'sidebar',
   '元件标识 (面包板)': 'Chip labels (breadboard)',
   '关=悬停显示': 'off = show on hover',
+  '跳线 (面包板)': 'Jumpers (breadboard)',
+  '关=隐藏': 'off = hide',
+  '按电平着色': 'Color by logic level',
+  '关=引脚/跳线单色': 'off = monochrome pins/wires',
   '原理图模式': 'Schematic',
   '面包板模式': 'Breadboard',
   'PCB 模式': 'PCB',
@@ -388,6 +392,7 @@ window.I18N_EN.help = `
         <li><span class="sw vz"></span> Dashed gray = high-impedance (Z): tri-state output disabled, net undriven.</li>
         <li>Unconnected inputs are treated as X; active-low pins whose name starts with <code>~</code> (e.g. ~CLR, ~OE, ~G2A) read X as "inactive" (like a weak pull-up).</li>
         <li>On wiring / power-up the engine gives X-output gates a one-shot "power-on perturbation", so pure feedback loops (ring oscillators, latches) can self-start.</li>
+        <li>The <b>View</b> menu toggles: <b>Color by logic level</b> — when off, pins/wires/jumpers stay monochrome in every mode; <b>Jumpers (breadboard)</b> — when off, breadboard jumpers are hidden.</li>
       </ul>
       <h4>Run controls</h4>
       <ul>
