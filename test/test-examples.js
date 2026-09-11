@@ -394,6 +394,18 @@ for (const ex of EXAMPLES) {
     const r = BB.autoWire(sim, sim.wiresRaw());
     const badJ = r.jumpers.filter(j => !BB.holePos(j.a) || !BB.holePos(j.b));
     check(`面包板: ${r.jumpers.length} 根跳线孔位全部有效`, badJ.length === 0, badJ);
+    /* 物理规则: 每孔至多一根跳线; 芯片引脚/模块腿占用的孔不可插线 */
+    {
+      const occH = BB.occupancy(sim);
+      const onChip = [], load = new Map();
+      for (const j of r.jumpers) for (const h of [j.a, j.b]) {
+        if (occH.get(h)) onChip.push(h);
+        load.set(h, (load.get(h) || 0) + 1);
+      }
+      const stacked = Array.from(load.entries()).filter(([, n]) => n > 1).map(([h]) => h);
+      check('面包板: 跳线端全部落在空闲孔 (不插芯片占用孔)', onChip.length === 0, onChip.slice(0, 8));
+      check('面包板: 每孔至多一根跳线 (无堆叠)', stacked.length === 0, stacked.slice(0, 8));
+    }
     const before = partition(sim.wiresRaw());
     const after = partition(BB.deriveWires(sim, r.jumpers));
     check('面包板: 派生网表与原理图等价', JSON.stringify(before) === JSON.stringify(after));

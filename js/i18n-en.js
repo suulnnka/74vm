@@ -172,6 +172,10 @@ window.I18N_EN = {
   '未放置元件 (拖到{t}上)': 'Unplaced chips (drag onto the {t})',
   '板{n} 电源轨 {r} 列{c}': 'Board {n} power rail {r} column {c}',
   '板{n} 孔位 {h} (同列5孔连通)': 'Board {n} hole {h} (5-hole column connected)',
+  '芯片占用, 不可插线': 'chip pin, no wire',
+  '已插跳线': 'jumper plugged',
+  '该孔已被芯片占用 (芯片孔不可插线)': 'Hole occupied by a chip (chip holes take no wire)',
+  '每孔只能插一根线 (目标孔被芯片或跳线占用)': 'One wire per hole (target hole taken by a chip or jumper)',
   '{type} · 引脚{num} {name} ({dir})': '{type} · pin{num} {name} ({dir})',
   '{d} — 点击或拖拽放置': '{d} — click or drag to place',
 

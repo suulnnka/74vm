@@ -529,6 +529,25 @@ console.log('\n[11] 供电: 电源脚孔位 / 自动供电跳线 / 供电判定'
   const info5 = BB.computeNets(sim, r5.jumpers);
   check('NE555 供电跳线 → 上电', BB.chipPowered(info5, n5) === true);
 
+  // 接线规则: 轨上 VCC/GND 元件占用的轨孔不可再插线, 全部孔位至多一根跳线
+  const vcc = sim.addChip('VCC', 0, 0), gnd = sim.addChip('GND', 0, 0);
+  vcc.bb = { kind: 'rail', board: 0, rail: 'R1', col: 5 };
+  gnd.bb = { kind: 'rail', board: 0, rail: 'R2', col: 5 };
+  const rV = BB.autoWire(sim, []);
+  const srcHoles = ['0:R1-5', '0:R2-5'];
+  check('供电轨元件占用的轨孔不插跳线',
+    rV.jumpers.every(j => !srcHoles.includes(j.a) && !srcHoles.includes(j.b)), srcHoles);
+  {
+    const occH = BB.occupancy(sim);
+    const onChip = [], load = new Map();
+    for (const j of rV.jumpers) for (const h of [j.a, j.b]) {
+      if (occH.get(h)) onChip.push(h);
+      load.set(h, (load.get(h) || 0) + 1);
+    }
+    check('跳线不落在任何芯片占用孔 (含轨上元件)', onChip.length === 0, onChip.slice(0, 6));
+    check('每孔至多一根跳线', [...load.values()].every(n => n === 1), [...load.entries()].filter(([, n]) => n > 1));
+  }
+
   // 网表等价性不受供电跳线影响 (电源网络无引脚, 不派生导线)
   const b = exByName('半加器').build();
   const sim2 = new Engine(LIB);

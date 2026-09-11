@@ -179,6 +179,7 @@ function bbJumperAt(w) {
 function bbPlaceNew(ch, wx, wy) {
   const def = LIB[ch.type];
   const board = wy != null ? bbBoardAt(wy) : 0;
+  const jocc = jumperHoleSet();
   if (ch.type === 'VCC' || ch.type === 'GND') {
     const rail = ch.type === 'VCC' ? 'R1' : 'R2';
     const occ = BB.occupancy(sim);
@@ -188,8 +189,9 @@ function bbPlaceNew(ch, wx, wy) {
       let placed = false;
       for (const c of cands) {
         if (c < 2 || c > BB.getCols()) continue;
-        const o = occ.get(board + ':' + rail + '-' + c);
-        if (!o || o.chip === ch) { ch.bb = { kind: 'rail', board, rail, col: c }; placed = true; break; }
+        const h = board + ':' + rail + '-' + c;
+        const o = occ.get(h);
+        if ((!o || o.chip === ch) && !jocc.has(h)) { ch.bb = { kind: 'rail', board, rail, col: c }; placed = true; break; }
       }
       if (placed) break;
     }
@@ -198,8 +200,8 @@ function bbPlaceNew(ch, wx, wy) {
     let col = Math.max(1, Math.min(BB.getCols() - span + 1,
       Math.round((wx - BB.colX(1)) / BB.PITCH) + 1 - Math.floor((span - 1) / 2)));
     for (let d = 0; d < BB.getCols(); d++) {
-      if (col + d <= BB.getCols() - span + 1 && BB.dipColsFree(sim, ch, board, col + d, span)) { col += d; break; }
-      if (col - d >= 1 && BB.dipColsFree(sim, ch, board, col - d, span)) { col -= d; break; }
+      if (col + d <= BB.getCols() - span + 1 && BB.dipColsFree(sim, ch, board, col + d, span, jocc)) { col += d; break; }
+      if (col - d >= 1 && BB.dipColsFree(sim, ch, board, col - d, span, jocc)) { col -= d; break; }
     }
     ch.bb = { kind: 'dip', board, col, flip: false };
   } else {
@@ -209,8 +211,9 @@ function bbPlaceNew(ch, wx, wy) {
     for (; col + n - 1 <= BB.getCols(); col++) {
       let ok = true;
       for (let i = 0; i < n; i++) {
-        const o = occ.get(board + ':a' + (col + i));
-        if (o && o.chip !== ch) { ok = false; break; }
+        const h = board + ':a' + (col + i);
+        const o = occ.get(h);
+        if ((o && o.chip !== ch) || jocc.has(h)) { ok = false; break; }
       }
       if (ok) break;
     }
@@ -241,11 +244,12 @@ function bbSetPos(ch, w) {
   const orig = ch.bb ? JSON.stringify(ch.bb) : null;
   const def = LIB[ch.type];
   const board = bbBoardAt(w.y);
+  const jocc = jumperHoleSet();
   if (!def.custom) {
     const span = BB.dipSpan(ch);
     let col = Math.round((w.x - BB.colX(1)) / BB.PITCH) + 1 - Math.floor((span - 1) / 2);
     col = Math.max(1, Math.min(BB.getCols() - span + 1, col));
-    if (BB.dipColsFree(sim, ch, board, col, span))
+    if (BB.dipColsFree(sim, ch, board, col, span, jocc))
       ch.bb = { kind: 'dip', board, col, flip: (ch.bb && ch.bb.flip) || false };
   } else if (ch.type === 'VCC' || ch.type === 'GND') {
     let best = null, bd = Infinity;
@@ -255,13 +259,16 @@ function bbSetPos(ch, w) {
     }
     let col = Math.max(1, Math.min(BB.getCols(), Math.round((w.x - BB.colX(1)) / BB.PITCH) + 1));
     const occ = BB.occupancy(sim);
-    if (occ.get(board + ':' + best.id + '-' + col) && occ.get(board + ':' + best.id + '-' + col).chip !== ch) {
+    const railBusy = c => {
+      const o = occ.get(board + ':' + best.id + '-' + c);
+      return (o && o.chip !== ch) || jocc.has(board + ':' + best.id + '-' + c);
+    };
+    if (railBusy(col)) {
       // 目标孔被占: 尝试邻列
       for (let d = 1; d < 4; d++) {
         for (const c2 of [col + d, col - d]) {
           if (c2 < 1 || c2 > BB.getCols()) continue;
-          const o = occ.get(board + ':' + best.id + '-' + c2);
-          if (!o || o.chip === ch) { col = c2; d = 99; break; }
+          if (!railBusy(c2)) { col = c2; d = 99; break; }
         }
       }
     }
@@ -278,8 +285,9 @@ function bbSetPos(ch, w) {
     const occ = BB.occupancy(sim);
     const rowFree = rw => {
       for (let i = 0; i < n; i++) {
-        const o = occ.get(board + ':' + rw + (col + i));
-        if (o && o.chip !== ch) return false;
+        const h = board + ':' + rw + (col + i);
+        const o = occ.get(h);
+        if ((o && o.chip !== ch) || jocc.has(h)) return false;
       }
       return true;
     };
@@ -290,6 +298,19 @@ function bbSetPos(ch, w) {
     // 邻近行全占用 → 保持原位
   }
   if (JSON.stringify(ch.bb) !== orig) applyBB();
+}
+
+/** 已插跳线的孔位集合 (放置元件时避开, 保证每孔一线) */
+function jumperHoleSet() {
+  const s = new Set();
+  for (const j of app.bb.jumpers) { s.add(j.a); s.add(j.b); }
+  return s;
+}
+
+/** 孔位是否可再插线: 未被芯片占用, 且其上没有别的跳线端 (每孔至多一根) */
+function holeFreeForWire(h, exceptJumper) {
+  if (BB.occupancy(sim).get(h)) return false;
+  return !app.bb.jumpers.some(j => j !== exceptJumper && (j.a === h || j.b === h));
 }
 
 function bbPointerDown(e) {
@@ -327,10 +348,13 @@ function bbPointerDown(e) {
   }
   const h = bbHoleAt(w);
   if (h) {
-    // 该孔只接一根跳线 → 拖动该跳线此端; 否则新建跳线 (跳线隐藏时一律新建)
+    // 接线规则: 每孔至多一根跳线, 芯片占用孔不可插线
     const attached = app.bbJumpers ? app.bb.jumpers.filter(j => j.a === h || j.b === h) : [];
     if (attached.length === 1) {
+      // 该孔已有的那根跳线 → 拖动此端
       app.bbWiring = { hole: h, cursor: w, moveJumper: attached[0], moveEndIsA: attached[0].a === h };
+    } else if (!attached.length && BB.occupancy(sim).get(h)) {
+      toast(t('该孔已被芯片占用 (芯片孔不可插线)'));
     } else {
       app.bbWiring = { hole: h, cursor: w };
     }
@@ -391,9 +415,12 @@ function bbPointerMove(e) {
     cancelHoverDetail();   // 孔位提示即刻显示, 撤下功能描述浮窗状态
     const ci = h.indexOf(':');
     const rest = h.slice(ci + 1);
-    tooltipEl.textContent = rest[0] === 'R'
+    let tip = rest[0] === 'R'
       ? tf('板{n} 电源轨 {r} 列{c}', { n: +h.slice(0, ci) + 1, r: rest.replace('-', ''), c: rest.replace(/[^-]+-/, '') })
       : tf('板{n} 孔位 {h} (同列5孔连通)', { n: +h.slice(0, ci) + 1, h: rest });
+    if (BB.occupancy(sim).get(h)) tip += ' · ' + t('芯片占用, 不可插线');
+    else if (app.bbJumpers && app.bb.jumpers.some(j => j.a === h || j.b === h)) tip += ' · ' + t('已插跳线');
+    tooltipEl.textContent = tip;
     tooltipEl.style.display = 'block';
     const p = BB.holePos(h);
     tooltipEl.style.left = ((p.x - app.cam.x) * app.cam.zoom + APP.CW / 2 + 12) + 'px';
@@ -424,15 +451,23 @@ function bbPointerUp(e) {
       const j = app.bbWiring.moveJumper;
       const other = app.bbWiring.moveEndIsA ? j.b : j.a;
       if (h && h !== app.bbWiring.hole && h !== other) {
-        pushUndo();
-        if (app.bbWiring.moveEndIsA) j.a = h; else j.b = h;
-        applyBB(); scheduleSave();
+        if (holeFreeForWire(h, j)) {
+          pushUndo();
+          if (app.bbWiring.moveEndIsA) j.a = h; else j.b = h;
+          applyBB(); scheduleSave();
+        } else {
+          toast(t('每孔只能插一根线 (目标孔被芯片或跳线占用)'));   // 保持原位
+        }
       }
       // 松开在空白/原孔 → 保持原跳线
     } else if (h && h !== app.bbWiring.hole) {
-      pushUndo();
-      app.bb.jumpers.push({ id: app.bb.nextId++, a: app.bbWiring.hole, b: h });
-      applyBB(); scheduleSave();
+      if (holeFreeForWire(h, null)) {
+        pushUndo();
+        app.bb.jumpers.push({ id: app.bb.nextId++, a: app.bbWiring.hole, b: h });
+        applyBB(); scheduleSave();
+      } else {
+        toast(t('每孔只能插一根线 (目标孔被芯片或跳线占用)'));
+      }
     }
     app.bbWiring = null;
     return;

@@ -6,6 +6,8 @@
  *   主区: 行 a b c d e | 沟道 | f g h i j   (每列每半区 5 孔连通)
  *   底部电源轨: R3(蓝 -), R4(红 +)
  * DIP 芯片横跨沟道: 引脚 1..n/2 在 e 行自左向右, 引脚 n/2+1..n 在 f 行自右向左
+ * 接线规则: 每孔至多插一根跳线; 芯片引脚/模块腿已占用的孔不可再插线
+ *   (autoWire 与界面接线共同保证; 元件放置避开已插跳线的孔)
  * 供电模型: DIP 电源脚 (默认 GND=物理中间脚 / VCC=物理最大脚, lib.pwr 可按真实引脚覆盖)
  *   所在列需跳线接通电源轨, 未上电芯片由引擎强制输出 X; 电源轨视为已接通台式电源
  * ========================================================================= */
@@ -14,7 +16,6 @@
 
 const LIBREF = () => (global.CHIPS || (global.window && global.window.CHIPS) || {}).LIB || {};
 const LIB_isIO = t => { const d = LIBREF()[t]; return !!(d && d.custom); };
-const LIB_isPower = t => t === 'VCC' || t === 'GND';
 
 const PITCH = 16;          // 孔距 (世界像素)
 const ROW_IO_W = 18;   // IO 元件端部占位: 一个孔宽 (含 2px 边距)
@@ -217,13 +218,20 @@ function occupancy(sim) {
   return occ;
 }
 
-/** DIP 占用的列区间是否空闲 (同板 DIP 不重叠, 且 e/f 行孔位不被其他元件占用) */
-function dipColsFree(sim, self, board, col, span) {
+/**
+ * DIP 占用的列区间是否空闲 (同板 DIP 不重叠):
+ *   a~j 整列无其他元件的腿/引脚 — 同列组落腿会经金属条短路;
+ *   e/f 行 (DIP 引脚插入行) 另须避开 blocked 集 (已插跳线的孔, 每孔一线)。
+ */
+function dipColsFree(sim, self, board, col, span, blocked) {
   const occ = occupancy(sim);
   for (let c = col; c < col + span; c++) {
-    for (const row of ['e', 'f']) {
+    for (const row of ROWS_TOP.concat(ROWS_BOT)) {
       const o = occ.get(board + ':' + row + c);
       if (o && o.chip !== self) return false;
+    }
+    if (blocked) for (const row of ['e', 'f']) {
+      if (blocked.has(board + ':' + row + c)) return false;
     }
   }
   for (const ch of sim.chips.values()) {
@@ -417,9 +425,12 @@ function autoPlace(sim) {
 
 /* ---------- 自动接线 (从原理图网表生成跳线) ---------- */
 /**
- * 对每个电气网络: 链式生成跳线 — 上一引脚所在连通组内取空闲孔 → 下一引脚孔位。
- * 组本身已属于该网络, 因此跳线只会连接同网络的组, 不会污染其他网络。
- * 电源网络优先走电源轨。
+ * 物理规则: 每孔至多插一根跳线; 芯片引脚/模块腿占用的孔不可再插线。
+ * 做法: 每个电气网络取其引脚所在的连通组为节点 (同组引脚经组内金属条天然连通,
+ *   组内只借空闲孔出线)。含电源轨组的网络 (VCC/GND 源在轨上) 星形 — 各列组直连
+ *   电源轨; 其余链式 — 按板/列排序依次相连, 每组至多进出各一线端。组内选孔距
+ *   参考点就近; 电源腿所在列组保留给供电 (信号线落入会经电源轨短路两个网络)。
+ * 最后为每颗 DIP / 有源虚拟元件生成 VCC/GND → 电源轨的供电跳线。
  */
 function autoWire(sim, schematicWires) {
   // 原理图引脚网络
@@ -442,20 +453,9 @@ function autoWire(sim, schematicWires) {
     }
   }
 
-  // 已被跳线占用的孔 (每孔一根, 保持整洁; 引脚孔允许重复 2 次)
-  const used = new Map();   // holeKey → 次数
+  const occ = occupancy(sim);   // 芯片占用孔 (DIP 引脚 / IO 腿 / 轨上 VCC-GND), 不可插线
+  const used = new Map();       // 孔 → 线端数 (每孔至多 1; 兜底复用时计警告)
   const take = h => used.set(h, (used.get(h) || 0) + 1);
-  const jumpers = [];
-  const railFreeCol = (board, rail, near) => {
-    for (let d = 0; d < COLS; d++) {
-      for (const c of [near + d, near - d]) {
-        if (c < 2 || c > COLS) continue;
-        const h = board + ':' + rail + '-' + c;
-        if (!used.get(h)) return h;
-      }
-    }
-    return board + ':' + rail + '-2';
-  };
   // 电源腿所在列整组保留给供电: 信号跳线落入会经电源轨把两个网络短路
   const pwrBlocked = new Set();
   for (const ch of sim.chips.values()) {
@@ -464,70 +464,86 @@ function autoWire(sim, schematicWires) {
     if (!ph) continue;
     for (const h of [ph.vcc, ph.gnd]) for (const hk of groupHoles(groupOf(h))) pwrBlocked.add(hk);
   }
-  // 孔位 → 引脚: 星形取点须避开其他网络的引脚孔, 否则跳线会短路别的网络
-  const pinAt = new Map();
-  for (const ch of sim.chips.values()) {
-    if (!ch.bb) continue;
-    for (const p of ch.pins) {
-      const h = pinHole(ch, p.num);
-      if (h) pinAt.set(h, ch.id + ':' + p.num);
-    }
-  }
 
   let warn = 0;
-  for (const [root, pins] of nets) {
-    if (pins.length < 2) continue;
-    // 该孔若承载其他网络的引脚则不可作星形取点
-    const foreign = h => {
-      const q = pinAt.get(h);
-      return q != null && find(q) !== root;
-    };
-    // VCC/GND 引脚排最前 (走轨)
-    pins.sort((a, b) => (LIB_isPower(a.chip.type) ? 0 : 1) - (LIB_isPower(b.chip.type) ? 0 : 1));
-    const p0 = pins[0];
-    const h0 = pinHole(p0.chip, p0.pinNum);
-    if (!h0) continue;
-    const viaRail = LIB_isPower(p0.chip.type) && h0[0] === 'R';
-    for (let i = 1; i < pins.length; i++) {
-      const p = pins[i];
-      const dst = pinHole(p.chip, p.pinNum);
-      if (!dst) continue;
-      let src;
-      if (viaRail) {
-        const ci = h0.indexOf(':');
-        const board = h0.slice(0, ci);
-        const rail = h0.slice(ci + 1).split('-')[0];
-        const di = dst.indexOf(':');
-        const near = +dst.slice(di + 2) || 8;   // dst = "b:e12" → 列号
-        src = railFreeCol(board, rail, near);
-      } else {
-        // 在 h0 的连通组内找空闲孔 (避开电源列与其他网络引脚孔)
-        const holes = groupHoles(groupOf(h0));
-        src = holes.find(h => !used.get(h) && !pwrBlocked.has(h) && !foreign(h)) ||
-              holes.find(h => (used.get(h) || 0) < 2 && !pwrBlocked.has(h) && !foreign(h)) ||
-              h0;
-        if (src === h0 && (used.get(h0) || 0) >= 2) warn++;
+  /** 组内选孔: 非芯片占用, 距参考点曼哈顿距离最近的空闲孔。
+   *  kind='signal': 另须避开电源腿列组 (落入会经电源轨短路两个网络);
+   *  kind='power': 另须避开 e/f 腿行 — DIP 电源脚物理插在该孔 (建模省略引脚,
+   *  occupancy 不含它, 须显式排除)。空闲孔耗尽时兜底取线端最少的孔并计警告。 */
+  const pickHole = (g, from, kind) => {
+    let best = null, bestD = 0, bestLoad = 0;
+    for (const h of groupHoles(g)) {
+      if (occ.get(h)) continue;
+      const row = h.slice(h.indexOf(':') + 1, h.indexOf(':') + 2);
+      if (kind === 'signal' && pwrBlocked.has(h)) continue;
+      if (kind === 'power' && (row === 'e' || row === 'f')) continue;
+      const p = holePos(h);
+      const d = Math.abs(p.x - from.x) + Math.abs(p.y - from.y);
+      const load = used.get(h) || 0;
+      if (best == null || load < bestLoad || (load === bestLoad && d < bestD)) {
+        best = h; bestD = d; bestLoad = load;
       }
-      jumpers.push({ a: src, b: dst });
-      take(src); take(dst);
+    }
+    if (!best) return null;
+    if (bestLoad > 0) warn++;
+    return best;
+  };
+
+  const jumpers = [];
+  for (const [, pins] of nets) {
+    if (pins.length < 2) continue;
+    // 网络 → 连通组 (锚点 = 组内第一个引脚孔); 同组多引脚无需跳线
+    const anchor = new Map();
+    for (const p of pins) {
+      const h = pinHole(p.chip, p.pinNum);
+      if (!h) continue;
+      const g = groupOf(h);
+      if (!anchor.has(g)) anchor.set(g, h);
+    }
+    if (anchor.size < 2) continue;
+    const groups = Array.from(anchor.keys());
+    const railG = groups.find(g => /:rail:/.test(g));
+    if (railG) {
+      // 电源网络: 以电源轨为枢纽, 各列组直连电源轨 (列端贴自身引脚, 轨端贴该列)
+      for (const g of groups) {
+        if (g === railG) continue;
+        const hB = pickHole(g, holePos(anchor.get(g)), 'signal');
+        if (!hB) { warn++; continue; }
+        const hA = pickHole(railG, holePos(hB), 'signal');
+        if (!hA) { warn++; continue; }
+        jumpers.push({ a: hA, b: hB });
+        take(hA); take(hB);
+      }
+    } else {
+      // 信号网络: 按板/列排序链式相连 (每组成都至多 2 线端, 5 孔组必有空位)
+      groups.sort((x, y) => {
+        const px = holePos(anchor.get(x)), py = holePos(anchor.get(y));
+        return (px.board - py.board) || (px.x - py.x) || (px.y - py.y);
+      });
+      for (let i = 1; i < groups.length; i++) {
+        const hA = pickHole(groups[i - 1], holePos(anchor.get(groups[i])), 'signal');
+        if (!hA) { warn++; continue; }
+        const hB = pickHole(groups[i], holePos(hA), 'signal');
+        if (!hB) { warn++; continue; }
+        jumpers.push({ a: hA, b: hB });
+        take(hA); take(hB);
+      }
     }
   }
 
-  // 供电跳线: 每颗 DIP / 有源虚拟元件的 VCC/GND 电源腿列 → 电源轨 (电源轨视为已接通台式电源)
-  const occ = occupancy(sim);
+  // 供电跳线: 每颗 DIP / 有源虚拟元件的 VCC/GND 电源腿列组 → 电源轨
+  // (电源轨视为已接通台式电源; 轨端避开已用/被 VCC-GND 元件占用的孔;
+  //  无源虚拟元件本身无电源概念, 与供电检查一致地不生成)
   for (const ch of sim.chips.values()) {
     if (!ch.bb) continue;
+    if (LIB_isIO(ch.type) && !isActiveCustom(ch.type)) continue;
     const ph = powerHoles(ch);
     if (!ph) continue;
     const b = ch.bb.board || 0;
     for (const [hole, rail] of [[ph.vcc, 'R1'], [ph.gnd, 'R2']]) {
-      const ci = hole.indexOf(':'), rest = hole.slice(ci + 1), col = rest.slice(1);
-      // 上半区列走 a~d 行, 下半区列走 g~j 行 (e/f 行是芯片腿, 不可插线)
-      const rows = ROWS_TOP.includes(rest[0]) ? ['a', 'b', 'c', 'd'] : ['j', 'i', 'h', 'g'];
-      const src = rows.map(r => hole.slice(0, ci + 1) + r + col)
-        .find(h => !used.get(h) && !occ.get(h));
-      if (!src) { warn++; continue; }
-      const dst = railFreeCol(b, rail, +col);
+      const src = pickHole(groupOf(hole), holePos(hole), 'power');   // 腿列组内就近取空闲孔
+      const dst = src && pickHole(b + ':rail:' + rail, holePos(src), 'power');
+      if (!src || !dst) { warn++; continue; }
       jumpers.push({ a: src, b: dst, pwr: true });
       take(src); take(dst);
     }

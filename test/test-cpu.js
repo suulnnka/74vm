@@ -385,6 +385,18 @@ console.log('\n[八] 面包板模式 (摆放 ' + EX.bb.cols + ' 列 × ' + EX.bb
   const r = BB.autoWire(sim, sim.wiresRaw());
   const badJ = r.jumpers.filter(j => !BB.holePos(j.a) || !BB.holePos(j.b));
   check('自动布线 ' + r.jumpers.length + ' 根跳线孔位全部有效', badJ.length === 0, badJ.length);
+  // 物理规则: 每孔至多一根跳线, 芯片占用孔 (含供电轨上的 VCC/GND) 不插线
+  {
+    const occH = BB.occupancy(sim);
+    const onChip = [], load = new Map();
+    for (const j of r.jumpers) for (const h of [j.a, j.b]) {
+      if (occH.get(h)) onChip.push(h);
+      load.set(h, (load.get(h) || 0) + 1);
+    }
+    const stacked = [...load.entries()].filter(([, n]) => n > 1).map(([h]) => h);
+    check('跳线端全部落在空闲孔 (不插芯片占用孔)', onChip.length === 0, onChip.slice(0, 6));
+    check('每孔至多一根跳线 (无堆叠)', stacked.length === 0, stacked.slice(0, 6));
+  }
   const part = (wires) => {
     const par = new Map();
     const find = k => { let x = k; while (par.get(x) !== x) x = par.get(x); return x; };
