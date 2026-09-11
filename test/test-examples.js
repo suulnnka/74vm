@@ -358,10 +358,12 @@ const FUNCS = {
 /* ---------------- 主流程 ---------------- */
 
 console.log(`\n共 ${EXAMPLES.length} 个内置示例, 逐个验证三种模式…\n`);
-BB.setCols(60); BB.setBoards(1);       // 与应用默认面包板一致
 
 for (const ex of EXAMPLES) {
   console.log('▶ ' + ex.name);
+  // 面包板规模: 示例可声明 bb: {cols, boards}, 否则用应用默认 60 列单板
+  if (ex.bb) { BB.setCols(ex.bb.cols); BB.setBoards(ex.bb.boards); }
+  else { BB.setCols(60); BB.setBoards(1); }
 
   /* [结构] 引脚号全部有效 (load 不静默丢线), 且无输出对撞 */
   {

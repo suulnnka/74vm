@@ -77,6 +77,8 @@ console.log('\n[3] 自动摆放+接线: 面包板网表与原理图网表等价 
   let allOK = true, bad = [];
   for (const ex of EXAMPLES) {
     try {
+      if (ex.bb) { BB.setCols(ex.bb.cols); BB.setBoards(ex.bb.boards); }
+      else { BB.setCols(60); BB.setBoards(1); }
       const sim = new Engine(LIB);
       const b = ex.build();
       sim.load({ chips: b.chips, wires: b.wires });

@@ -24,7 +24,294 @@ function B() {
   return { chips, wires, add, wire };
 }
 
+/* =========================================================================
+ * VM-8 — 74 系列微码 8 位 CPU (时钟计算机示例的构建核心)
+ *
+ * 架构 (40 个元件):
+ *   总线 8 位; PC=2×74161(+74245 总线缓冲); MAR/IR/A/B/OUT=74374;
+ *   程序 ROM=74S472 256B; RAM=6116; ALU=74283×2+7486×2(+74245 缓冲, 加/减);
+ *   定序器=74161 (6 节拍/指令, 下降沿计数); 控制 ROM=74S472×3
+ *   (地址 = {节拍3位, IR.bit3, 操作码4位}); Z 标志=7474 (或树+触发器)。
+ * 外设: LCD1602 (OUT 寄存器直驱数据, RS/E 由微码产生);
+ *   PS/2 → 74164 移位 + 74161 位计数 (第 9 位对齐) + 74374 键码锁存;
+ *   1Hz 时钟 → 7474 秒沿标志; 74245 汇成输入口 (bit0=秒, bit1=新键)。
+ * 时序: 寄存器在 CLK 上升沿写入 (行使能经与门), 定序器在下降沿推进,
+ *   控制行在半周期内稳定 → 每行恰好提交一次; RAM /WE=NaN(RW·CLK) 限写窗。
+ * ISA (高 4 位操作码, 2 字节指令带 8 位操作数):
+ *   0 NOP 1 LDI 2 LDA 3 STA 4 ADI 5 ADA 6 CPI 7 CMA
+ *   8 OUT 9 CMD A JMP B JZ C JNZ D KBD E TCK F CLF/CLT(0xF0/0xF8)
+ * ========================================================================= */
+
+/* ---- 微码: 信号语义 → 3 片 74S472 的内容 ----
+ * 位极性按消费端定义:
+ *   低有效(0=有效, 直驱 /OE·/CE·~CLR 或进入低有效分支网): CO RO RI AO EO KO TI TF KF JP JM JN
+ *   高有效(1=有效, 经与门/ENP/E/RS/SUB): MI II RW CE AI BI OI RS SUB E RUN(D7 停机位, 常为 1) */
+const VM8_MC = (() => {
+  const F0 = ['CO', 'MI'], F1 = ['RO', 'II', 'CE'];
+  const T2B = ['CO', 'MI', 'CE'], T21 = ['CO', 'MI'];
+  const rows = [];
+  rows[0x0] = [F0, F1, T21, [], [], []];
+  rows[0x1] = [F0, F1, T2B, ['RO', 'AI'], [], []];
+  rows[0x2] = [F0, F1, T2B, ['RO', 'MI'], ['RI', 'AI'], []];
+  rows[0x3] = [F0, F1, T2B, ['RO', 'MI'], ['AO', 'RW', 'RI'], []];
+  rows[0x4] = [F0, F1, T2B, ['RO', 'BI'], ['EO', 'AI'], []];
+  rows[0x5] = [F0, F1, T2B, ['RO', 'MI'], ['RI', 'BI'], ['EO', 'AI']];
+  rows[0x6] = [F0, F1, T2B, ['RO', 'BI'], ['EO', 'SUB'], []];
+  rows[0x7] = [F0, F1, T2B, ['RO', 'MI'], ['RI', 'BI'], ['EO', 'SUB']];
+  rows[0x8] = [F0, F1, T21, ['AO', 'OI', 'RS'], ['E', 'RS'], []];
+  rows[0x9] = [F0, F1, T21, ['AO', 'OI'], ['E'], []];
+  rows[0xA] = [F0, F1, T2B, ['RO', 'JP'], [], []];
+  rows[0xB] = [F0, F1, T2B, ['RO', 'JM'], [], []];
+  rows[0xC] = [F0, F1, T2B, ['RO', 'JN'], [], []];
+  rows[0xD] = [F0, F1, T21, ['KO', 'AI'], [], []];
+  rows[0xE] = [F0, F1, T21, ['TI', 'AI'], [], []];
+  rows[0xF] = [F0, F1, T21, ['KF'], [], []];          // 0xF0=CLF; 0xF8=CLT 变体
+  const MAP = [
+    [0, { CO: 0x01, MI: 0x02, RO: 0x04, II: 0x08, RI: 0x20, RW: 0x40, CE: 0x80 }],
+    [1, { AI: 0x01, AO: 0x02, BI: 0x04, EO: 0x08, OI: 0x10, KO: 0x20, TI: 0x40, RS: 0x80 }],
+    [2, { TF: 0x01, KF: 0x02, SUB: 0x04, E: 0x08, JP: 0x10, JM: 0x20, JN: 0x40, RUN: 0x80 }],
+  ];
+  /* 空闲行: 低有效位=1, 高有效位=0 (全不有效); 定序器回绕瞬态经过 step 6 时不误触发 */
+  const IDLE = [0x3E, 0x6E, 0xF3];
+  const c = [new Array(512).fill(IDLE[0]), new Array(512).fill(IDLE[1]), new Array(512).fill(IDLE[2])];
+  for (let addr = 0; addr < 512; addr++) {
+    const op = (addr >> 4) & 0xF, bit3 = (addr >> 3) & 1, step = addr & 7;
+    if (step > 5) continue;
+    c[0][addr] = IDLE[0]; c[1][addr] = IDLE[1]; c[2][addr] = IDLE[2];
+    let set;
+    if (op === 0xF && bit3) set = (step >= 3 ? ['TF'] : rows[0xF][step]);
+    else set = rows[op][step];
+    set = set.concat('RUN');
+    for (const [i, map] of MAP) {
+      let v = c[i][addr];
+      for (const s in map) {
+        const on = set.indexOf(s) >= 0;
+        if (s === 'RUN') v = on ? (v | map[s]) : (v & ~map[s]);      // RUN 高有效
+        else if (['MI', 'II', 'RW', 'CE', 'AI', 'BI', 'OI', 'RS', 'SUB', 'E'].indexOf(s) >= 0)
+          v = on ? (v | map[s]) : (v & ~map[s]);                     // 高有效组
+        else v = on ? (v & ~map[s]) : (v | map[s]);                  // 低有效组
+      }
+      c[i][addr] = v;
+    }
+  }
+  return c;
+})();
+
+/* ---- 迷你汇编器: 两遍扫描, 标签 + 0x/十进制立即数 ---- */
+const VM8_OPS = {
+  NOP: { op: 0x0, len: 1 }, LDI: { op: 0x1, len: 2 }, LDA: { op: 0x2, len: 2 },
+  STA: { op: 0x3, len: 2 }, ADI: { op: 0x4, len: 2 }, ADA: { op: 0x5, len: 2 },
+  CPI: { op: 0x6, len: 2 }, CMA: { op: 0x7, len: 2 }, OUT: { op: 0x8, len: 1 },
+  CMD: { op: 0x9, len: 1 }, JMP: { op: 0xA, len: 2 }, JZ: { op: 0xB, len: 2 },
+  JNZ: { op: 0xC, len: 2 }, KBD: { op: 0xD, len: 1 }, TCK: { op: 0xE, len: 1 },
+  CLF: { op: 0xF, len: 1, imm: 0x0 }, CLT: { op: 0xF, len: 1, imm: 0x8 },
+};
+function vm8Assemble(src) {
+  const srcText = Array.isArray(src) ? src.join('\n') : String(src);
+  const lines = srcText.split('\n');
+  const items = [], consts = {};
+  for (const raw of lines) {
+    const line = raw.replace(/;.*$/, '').trim();
+    if (!line) continue;
+    const cm = line.match(/^([A-Za-z_][\w.]*)\s*=\s*(\S+)\s*$/);
+    if (cm) { consts[cm[1]] = cm[2]; continue; }
+    let rest = line;
+    const lm = rest.match(/^([A-Za-z_][\w.]*):\s*/);
+    if (lm) { items.push({ label: lm[1] }); rest = rest.slice(lm[0].length); }
+    if (!rest) continue;
+    const m = rest.match(/^(\w+)\s*(.*)$/);
+    if (!m || !VM8_OPS[m[1].toUpperCase()]) throw new Error('VM-8 汇编: 无法识别: ' + line);
+    items.push({ mn: m[1].toUpperCase(), arg: m[2].trim() });
+  }
+  const pass = (resolve) => {
+    const mem = new Array(512).fill(0x00);             // 出厂区: NOP
+    let pc = 0;
+    for (const it of items) {
+      if (it.label) { if (!resolve) it.addr = pc; continue; }
+      const d = VM8_OPS[it.mn];
+      if (pc + d.len > 254) throw new Error('VM-8 程序超出 254 字节: ' + pc);
+      if (resolve) {
+        mem[pc] = (d.op << 4) | (d.imm != null ? d.imm : 0);
+        if (d.len === 2) {
+          let v = it.argVal;
+          if (v == null) throw new Error('VM-8 汇编: 缺操作数: ' + it.mn);
+          if (typeof v === 'string') {
+            if (!(v in resolve.labels)) throw new Error('VM-8 汇编: 未知标签: ' + v);
+            v = resolve.labels[v];
+          }
+          if (!(v >= 0 && v <= 255)) throw new Error('VM-8 汇编: 操作数越界: ' + v);
+          mem[pc + 1] = v;
+        }
+      } else if (d.len === 2 && !/^(0x[0-9a-f]+|\d+)$/i.test(it.arg || '')) {
+        it.argVal = it.arg;                            // 标签操作数, 二次解析
+      } else if (d.len === 2) {
+        it.argVal = parseInt(it.arg, 0);
+      }
+      pc += d.len;
+    }
+    return { mem, size: pc };
+  };
+  pass(null);
+  const labels = {};
+  for (const k in consts) {
+    let v = consts[k];
+    v = /^(0x[0-9a-f]+|\d+)$/i.test(v) ? parseInt(v, 0) : consts[v] != null ? consts[v] : labels[v];
+    if (!(v >= 0)) throw new Error('VM-8 汇编: 常量未定义: ' + k + '=' + consts[k]);
+    labels[k] = v;
+  }
+  for (const it of items) if (it.label) labels[it.label] = it.addr;
+  const r = pass({ labels });
+  return { mem: r.mem, size: r.size, labels };
+}
+
+/* ---- 时钟程序: 1602 显示 HH:MM:SS; 键 A(0x1C)=时+1, C(0x21)=秒清零 ----
+ * RAM: 0x10 秒个 0x11 秒十 0x12 分个 0x13 分十 0x14 时个 0x15 时十 (BCD) */
+const VM8_PROG = vm8Assemble([
+  'SEC1  = 0x10        ; RAM: 秒个位 (BCD)',
+  'SEC10 = 0x11',
+  'MIN1  = 0x12',
+  'MIN10 = 0x13',
+  'HR1   = 0x14',
+  'HR10  = 0x15',
+  '        LDI 0x01        ; 清屏',
+  '        CMD',
+  '        LDI 0',
+  '        STA SEC1',
+  '        STA SEC10',
+  '        STA MIN1',
+  '        STA MIN10',
+  '        STA HR1',
+  '        STA HR10',
+  '        JMP REFRESH',
+  'MAIN:   TCK             ; A = 事件: bit0 秒 tick, bit1 新键',
+  '        CPI 0',
+  '        JZ MAIN',
+  '        CPI 1',
+  '        JZ DOTICK',
+  '        KBD             ; 有键: 先取键码并清键标志',
+  '        CLF',
+  '        CPI 0xF0        ; break 前缀: 丢弃',
+  '        JZ MAIN',
+  '        CPI 0x1C        ; A 键 → 时 +1',
+  '        JZ KHOUR',
+  '        CPI 0x21        ; C 键 → 秒清零',
+  '        JZ KSEC',
+  '        JMP MAIN',
+  'KSEC:   LDI 0',
+  '        STA SEC1',
+  '        STA SEC10',
+  '        JMP REFRESH',
+  '; --- 时 +1 (BCD 个位/十位, 24 小时回绕) ---',
+  'KHOUR:  LDA HR1',
+  '        ADI 1',
+  '        CPI 10',
+  '        JZ KH1',
+  '        STA HR1',
+  '        JMP KHRNG',
+  'KH1:    LDI 0',
+  '        STA HR1',
+  '        LDA HR10',
+  '        ADI 1',
+  '        STA HR10',
+  'KHRNG:  LDA HR10',
+  '        CPI 2',
+  '        JZ KHR2',
+  '        JMP REFRESH',
+  'KHR2:   LDA HR1',
+  '        CPI 4',
+  '        JZ KHWR',
+  '        JMP REFRESH',
+  'KHWR:   LDI 0',
+  '        STA HR10',
+  '        STA HR1',
+  '        JMP REFRESH',
+  '; --- 秒 tick: BCD 进位链 秒→分→时 ---',
+  'DOTICK: CLT',
+  '        LDA SEC1',
+  '        ADI 1',
+  '        CPI 10',
+  '        JZ TS1',
+  '        STA SEC1',
+  '        JMP REFRESH',
+  'TS1:    LDI 0',
+  '        STA SEC1',
+  '        LDA SEC10',
+  '        ADI 1',
+  '        CPI 6',
+  '        JZ TS10',
+  '        STA SEC10',
+  '        JMP REFRESH',
+  'TS10:   LDI 0',
+  '        STA SEC10',
+  '        LDA MIN1',
+  '        ADI 1',
+  '        CPI 10',
+  '        JZ TM1',
+  '        STA MIN1',
+  '        JMP REFRESH',
+  'TM1:    LDI 0',
+  '        STA MIN1',
+  '        LDA MIN10',
+  '        ADI 1',
+  '        CPI 6',
+  '        JZ TM10',
+  '        STA MIN10',
+  '        JMP REFRESH',
+  'TM10:   LDI 0',
+  '        STA MIN10',
+  '        LDA HR1',
+  '        ADI 1',
+  '        CPI 10',
+  '        JZ TH1',
+  '        STA HR1',
+  '        JMP REFRESH',
+  'TH1:    LDI 0',
+  '        STA HR1',
+  '        LDA HR10',
+  '        ADI 1',
+  '        STA HR10',
+  'THR:    LDA HR10',
+  '        CPI 2',
+  '        JZ THR2',
+  '        JMP REFRESH',
+  'THR2:   LDA HR1',
+  '        CPI 4',
+  '        JZ THWR',
+  '        JMP REFRESH',
+  'THWR:   LDI 0',
+  '        STA HR10',
+  '        STA HR1',
+  '; --- 刷新 1602 第 1 行: HH:MM:SS ---',
+  'REFRESH:',
+  '        LDI 0x80',
+  '        CMD',
+  '        LDA HR10',
+  '        ADI 48',
+  '        OUT',
+  '        LDA HR1',
+  '        ADI 48',
+  '        OUT',
+  '        LDI 0x3A',
+  '        OUT',
+  '        LDA MIN10',
+  '        ADI 48',
+  '        OUT',
+  '        LDA MIN1',
+  '        ADI 48',
+  '        OUT',
+  '        LDI 0x3A',
+  '        OUT',
+  '        LDA SEC10',
+  '        ADI 48',
+  '        OUT',
+  '        LDA SEC1',
+  '        ADI 48',
+  '        OUT',
+  '        JMP MAIN',
+]);
+
 const EXAMPLES = [];
+global.VM8 = { MC: VM8_MC, PROG: VM8_PROG, assemble: vm8Assemble, OPS: VM8_OPS };
 
 /* 1. SR 锁存器 (7400 与非门交叉耦合) */
 EXAMPLES.push({
@@ -392,6 +679,239 @@ EXAMPLES.push({
     b.wire(btnE, 1, lcd, 2);       // E 上升沿锁存
     // D7..D0 开关 → D7..D0 引脚 (10 - i)
     swD.forEach((sw, i) => b.wire(sw, 1, lcd, 10 - i));
+    return b;
+  },
+});
+
+/* 17. VM-8 微码 8 位 CPU 时钟计算机 */
+EXAMPLES.push({
+  name: 'VM-8 CPU 时钟计算机 (1602+PS/2)',
+  desc: 'ROM 程序驱动 1602 显示 HH:MM:SS; 键 A=时+1, C=秒清零; 1Hz 实时时钟输入 (按键恰逢 CLF 清除窗口可能丢失, 重按即可)',
+  bb: { cols: 185, boards: 3 },
+  build() {
+    const b = B();
+    const id = {};
+    const A = (key, type, x, y, opt) => { id[key] = b.add(type, x, y, opt); return id[key]; };
+    const N = (...eps) => { for (let i = 1; i < eps.length; i++) b.wire(eps[0][0], eps[0][1], eps[i][0], eps[i][1]); };
+
+    /* ---- 元件 ---- */
+    A('ckSys', 'CLOCK', 100, 40, { props: { freq: 4000, label: '主时钟 4kHz' } });
+    A('ckTick', 'CLOCK', 100, 200, { props: { freq: 1, label: '实时时钟 1Hz' } });
+    A('and1', '7408', 320, 40);    A('and2', '7408', 540, 40);
+    A('and3', '7408', 760, 40);    A('and4', '7408', 980, 40);
+    A('and5', '7408', 1420, 40);   // 键盘捕获解码选通 (防计数迁移毛刺)
+    A('nand', '7400', 1200, 40);
+    A('inv1', '7404', 320, 200);   A('inv2', '7404', 540, 200);
+    A('zor1', '7432', 760, 200);   A('zor2', '7432', 980, 200);
+    A('cor3', '7432', 1200, 200);
+    A('flags', '7474', 100, 360);  A('keyf', '7474', 320, 360);
+    A('port', '74245', 540, 360);  A('ps2', 'PS2', 770, 360);
+    A('ksh', '74164', 1000, 360);  A('kcnt', '74161', 1240, 360);
+    A('kreg', '74374', 1460, 360);
+    A('pclo', '74161', 100, 560);  A('pchi', '74161', 330, 560);
+    A('pcbuf', '74245', 560, 560); A('mar', '74374', 790, 560);
+    A('rom', '74S472', 1020, 560, { props: { tag: 'vm8-program', mem: VM8.PROG.mem.slice() } });
+    A('ram', '6116', 1450, 560);
+    A('stp', '74161', 100, 780);   A('ir', '74374', 330, 780);
+    A('mc0', '74S472', 560, 780, { props: { mem: VM8.MC[0].slice() } });
+    A('mc1', '74S472', 990, 780, { props: { mem: VM8.MC[1].slice() } });
+    A('mc2', '74S472', 1420, 780, { props: { mem: VM8.MC[2].slice() } });
+    // A/B 寄存器用 74175 (Q 常驱动 → ALU 恒可见); A 上总线另经 74245 缓冲
+    A('regalo', '74175', 100, 1000); A('regahi', '74175', 240, 1000);
+    A('rblo', '74175', 380, 1000);   A('rbhi', '74175', 520, 1000);
+    A('abuf', '74245', 660, 1000);
+    A('xorl', '7486', 810, 1000);  A('xorh', '7486', 950, 1000);
+    A('alul', '74283', 1090, 1000); A('aluh', '74283', 1230, 1000);
+    A('alubuf', '74245', 1370, 1000);
+    A('outR', '74374', 100, 1220); A('lcd', 'LCD1602', 340, 1220);
+    A('vcc', 'VCC', 640, 1260);    A('gnd', 'GND', 730, 1260);
+
+    /* ---- 8 位总线 ---- */
+    const Q175 = [3, 6, 10, 13];
+    const bus = [[], [], [], [], [], [], [], []];
+    for (let j = 0; j < 8; j++) {
+      bus[j].push(
+        [id.pcbuf, 19 - j], [id.rom, 11 + j], [id.ram, 13 + j],
+        [id.ir, 2 + j],
+        [id.abuf, 19 - j],
+        [id.alubuf, 19 - j], [id.kreg, 12 + j], [id.port, 2 + j],
+        [id.mar, 2 + j], [id.outR, 2 + j],
+        j < 4 ? [id.pclo, 3 + j] : [id.pchi, j - 1]);
+    }
+    // A/B 寄存器 74175 的 D 脚按位挂总线 (引脚离散)
+    const D175 = [15, 5, 11, 14];
+    for (let j = 0; j < 4; j++) {
+      bus[j].push([id.regalo, D175[j]], [id.rblo, D175[j]]);
+      bus[j + 4].push([id.regahi, D175[j]], [id.rbhi, D175[j]]);
+    }
+    bus.forEach(eps => N(...eps));
+
+    /* ---- 地址总线: MAR → ROM/RAM ---- */
+    for (let j = 0; j < 8; j++) N([id.mar, 19 - j], [id.rom, 1 + j], [id.ram, 1 + j]);
+
+    /* ---- PC 输出 → 总线缓冲 ---- */
+    for (let j = 0; j < 4; j++) {
+      N([id.pclo, 14 - j], [id.pcbuf, 2 + j]);
+      N([id.pchi, 14 - j], [id.pcbuf, 6 + j]);
+    }
+
+    /* ---- A 缓冲 (74175 Q → 74245 → 总线, /AO 使能) ---- */
+    for (let j = 0; j < 4; j++) {
+      N([id.regalo, Q175[j]], [id.abuf, 2 + j]);
+      N([id.regahi, Q175[j]], [id.abuf, 6 + j]);
+    }
+    N([id.vcc, 1], [id.abuf, 1]);                  // DIR=A→B
+
+    /* ---- ALU: B^SUB → 74283; A 直入; 和 → 缓冲 + 零检测 ---- */
+    const XP = [[1, 2, 3], [4, 5, 6], [9, 10, 8], [12, 13, 11]];
+    const AB = [6, 2, 15, 11], AA = [5, 3, 14, 12], SS = [4, 1, 13, 10];
+    for (let j = 0; j < 4; j++) {
+      N([id.rblo, Q175[j]], [id.xorl, XP[j][0]]); N([id.mc2, 13], [id.xorl, XP[j][1]]);
+      N([id.xorl, XP[j][2]], [id.alul, AB[j]]);
+      N([id.regalo, Q175[j]], [id.alul, AA[j]]);
+      N([id.rbhi, Q175[j]], [id.xorh, XP[j][0]]); N([id.mc2, 13], [id.xorh, XP[j][1]]);
+      N([id.xorh, XP[j][2]], [id.aluh, AB[j]]);
+      N([id.regahi, Q175[j]], [id.aluh, AA[j]]);
+    }
+    N([id.alul, 9], [id.aluh, 7]);                 // 低 4 位进位 → 高位 C0
+    N([id.mc2, 13], [id.alul, 7]);                 // SUB → C0 (+1 补码减法)
+    const SUM = j => [j < 4 ? id.alul : id.aluh, SS[j % 4]];
+    for (let j = 0; j < 8; j++) N(SUM(j), [id.alubuf, 2 + j]);
+    N(SUM(0), [id.zor1, 1]); N(SUM(1), [id.zor1, 2]);
+    N(SUM(2), [id.zor1, 4]); N(SUM(3), [id.zor1, 5]);
+    N(SUM(4), [id.zor1, 9]); N(SUM(5), [id.zor1, 10]);
+    N(SUM(6), [id.zor1, 12]); N(SUM(7), [id.zor1, 13]);
+    N([id.zor1, 3], [id.zor2, 1]); N([id.zor1, 6], [id.zor2, 2]);
+    N([id.zor1, 8], [id.zor2, 4]); N([id.zor1, 11], [id.zor2, 5]);
+    N([id.zor2, 3], [id.zor2, 9]); N([id.zor2, 6], [id.zor2, 10]);
+    N([id.zor2, 8], [id.inv2, 1]);                 // Z = NOR8(和)
+    N([id.inv2, 2], [id.flags, 2]);                // Z → 标志 1D
+
+    /* ---- 分支条件: 控制位低有效, /PL = JP·(JM+~Z)·(JN+Z) ---- */
+    N([id.flags, 5], [id.inv2, 3]);                // Z → ~Z
+    N([id.mc2, 16], [id.cor3, 1]);                 // JM
+    N([id.inv2, 4], [id.cor3, 2]);                 // ~Z
+    N([id.mc2, 17], [id.cor3, 4]);                 // JN
+    N([id.flags, 5], [id.cor3, 5]);                // Z
+    N([id.mc2, 15], [id.and2, 4]);                 // JP
+    N([id.cor3, 3], [id.and2, 5]);                 // (JM+~Z)
+    N([id.and2, 6], [id.and2, 12]);                // (JM+~Z)
+    N([id.cor3, 6], [id.and2, 13]);                // (JN+Z)
+    N([id.and2, 11], [id.pclo, 9]);                // /PL
+    N([id.and2, 11], [id.pchi, 9]);
+
+    /* ---- 寄存器写入与门: CK = CLK·使能 ---- */
+    N([id.ckSys, 1], [id.and1, 1]); N([id.mc0, 12], [id.and1, 2]); N([id.and1, 3], [id.mar, 11]);
+    N([id.ckSys, 1], [id.and1, 4]); N([id.mc0, 14], [id.and1, 5]); N([id.and1, 6], [id.ir, 11]);
+    N([id.ckSys, 1], [id.and1, 9]); N([id.mc1, 11], [id.and1, 10]);
+    N([id.and1, 8], [id.regalo, 1], [id.regahi, 1]);   // AI → A 寄存器时钟
+    N([id.ckSys, 1], [id.and1, 12]); N([id.mc1, 13], [id.and1, 13]);
+    N([id.and1, 11], [id.rblo, 1], [id.rbhi, 1]);      // BI → B 寄存器时钟
+    N([id.ckSys, 1], [id.and2, 1]); N([id.mc1, 15], [id.and2, 2]); N([id.and2, 3], [id.outR, 11]);
+    N([id.ckSys, 1], [id.and2, 9]);
+    N([id.mc1, 14], [id.inv2, 9]);                 // EO 低有效 → 反相供标志时钟门
+    N([id.inv2, 8], [id.and2, 10]);
+    N([id.and2, 8], [id.flags, 3]);                // Z 标志 CK = CLK·EO
+
+    /* ---- 主时钟门控 / LCD 选通 / RAM 写窗 ---- */
+    N([id.mc2, 18], [id.and4, 2]);                 // D7=RUN(1=运行): 0 时停振
+    N([id.ckSys, 1], [id.and4, 1]);                // sysclk = CLK·RUN
+    N([id.and4, 3], [id.inv1, 11]);
+    N([id.inv1, 10], [id.stp, 2]);                 // 定序器下降沿推进
+    N([id.and4, 3], [id.pclo, 2]);                 // PC 在上升沿计数/装数
+    N([id.and4, 3], [id.pchi, 2]);
+    N([id.mc2, 14], [id.and4, 4]);                 // E (T4 行有效)
+    N([id.and4, 3], [id.and4, 5]);
+    N([id.and4, 6], [id.lcd, 2]);                  // E = 微码E·sysclk: 上升沿在 OUT 装载之后, 单脉冲
+    N([id.mc0, 17], [id.nand, 2]);                 // RW
+    N([id.ckSys, 1], [id.nand, 1]);
+    N([id.nand, 3], [id.ram, 12]);                 // /WE = NAND(RW, CLK)
+
+    /* ---- 键盘捕获: 位计数第 9 拍锁存键码并复位 ---- */
+    N([id.ps2, 1], [id.inv1, 13]);
+    N([id.inv1, 12], [id.kcnt, 2]);                // 反相 → 位计数与移位同源(免上电虚位)
+    N([id.inv1, 12], [id.ksh, 8]);                 // 74164 同在下降沿采样
+    N([id.ps2, 2], [id.ksh, 1]); N([id.ps2, 2], [id.ksh, 2]);
+    const KQ = [3, 4, 5, 6, 9, 10, 11, 12];        // Q0..Q7 = d7..d0
+    for (let j = 0; j < 8; j++) N([id.ksh, KQ[j]], [id.kreg, 2 + j]);
+    // 位对齐: PS2 CLK 下降沿采样, 第 9 个下降沿移入 d7 → 计数=9 (QD·~QC·~QB·QA)
+    // LATCH=count9 锁存键码; CLEAR=count11 (QD·~QC·QB·QA, stop 拍) 清零计数器+移位器
+    // 关键: 两解码均用 CLK(=ps2.1) 选通 — 脉冲只在位中心 (CLK 上升) 产生, 此时
+    // 计数解码已稳定 30µs; 而 9→10 迁移毛刺发生时 CLK 已变低, 被彻底挡住
+    N([id.kcnt, 12], [id.inv1, 1]);                // QC → ~QC
+    N([id.kcnt, 13], [id.inv1, 3]);                // QB → ~QB
+    N([id.kcnt, 11], [id.and3, 1]);                // QD
+    N([id.inv1, 2], [id.and3, 2]);                 // ~QC
+    N([id.and3, 3], [id.and3, 4]);                 // T1 = QD·~QC (count 8..11)
+    N([id.kcnt, 14], [id.and3, 5]);                // +QA → 公共项 = count 9/11
+    N([id.and3, 6], [id.and3, 9]);
+    N([id.inv1, 4], [id.and3, 10]);                // +~QB → LATCH 解码 = count 9
+    N([id.ps2, 1], [id.and5, 1]);                  // CLK 选通 (位中心)
+    N([id.and3, 8], [id.and5, 2]);                 // LATCH = count9·CLK (位中心 9, d0..d7 已稳定)
+    N([id.and5, 3], [id.kreg, 11]);                // LATCH: 键码锁存
+    N([id.and5, 3], [id.keyf, 3]);                 // 置位键标志 (D=VCC)
+    N([id.and3, 6], [id.and4, 9]);                 // 公共项
+    N([id.kcnt, 13], [id.and4, 10]);               // +QB → CLEAR 解码 = count 9/11
+    N([id.ps2, 1], [id.and5, 4]);                  // CLK 选通
+    N([id.and4, 8], [id.and5, 5]);                 // CLEAR = count11·CLK (stop 位中心, 挡 9→10 迁移毛刺)
+    N([id.and5, 6], [id.inv1, 5]);
+    N([id.inv1, 6], [id.kcnt, 1]);                 // CLEAR: 计数器清零
+    N([id.inv1, 6], [id.ksh, 13]);                 // 移位寄存器 ~CLR 一起清 (锁存已先行)
+    N([id.stp, 12], [id.and3, 12]);                // 定序器 QC·QB (6=110) → 回绕
+    N([id.stp, 13], [id.and3, 13]);
+    N([id.and3, 11], [id.inv1, 9]);
+    N([id.inv1, 8], [id.stp, 1]);
+
+    /* ---- 控制 ROM 地址: {定序器3位, IR 低, IR 高} ---- */
+    for (const k of ['mc0', 'mc1', 'mc2']) {
+      N([id.stp, 14], [id[k], 1]);
+      N([id.stp, 13], [id[k], 2]);
+      N([id.stp, 12], [id[k], 3]);
+      N([id.ir, 16], [id[k], 4]);
+      N([id.ir, 15], [id[k], 5]);
+      N([id.ir, 14], [id[k], 6]);
+      N([id.ir, 13], [id[k], 7]);
+      N([id.ir, 12], [id[k], 8]);
+    }
+
+    /* ---- 控制信号分配 ---- */
+    N([id.mc0, 11], [id.pcbuf, 11]);               // /CO
+    N([id.mc0, 13], [id.rom, 10]);                 // /RO
+    N([id.mc0, 16], [id.ram, 22]);                 // /RI
+    N([id.mc0, 18], [id.pclo, 7]);                 // CE
+    N([id.mc0, 18], [id.pchi, 7]);
+    N([id.mc1, 12], [id.abuf, 11]);                // /AO
+    N([id.mc1, 14], [id.alubuf, 11]);              // /EO
+    N([id.mc1, 16], [id.kreg, 1]);                 // /KO
+    N([id.mc1, 17], [id.port, 11]);                // /TI
+    N([id.mc1, 18], [id.lcd, 1]);                  // RS
+    N([id.mc2, 11], [id.flags, 13]);               // /TF
+    N([id.mc2, 12], [id.keyf, 1]);                 // /KF
+
+    /* ---- 输入口 / LCD 数据 ---- */
+    N([id.ckTick, 1], [id.flags, 11]);             // 1Hz → 秒标志 CK (D=VCC 置位)
+    N([id.flags, 8], [id.port, 19]);               // 秒标志 → bit0
+    N([id.keyf, 5], [id.port, 18]);                // 键标志 → bit1
+    for (let j = 0; j < 8; j++) N([id.outR, 19 - j], [id.lcd, 3 + j]);
+
+    /* ---- 逻辑 1 / 0 汇流点 ---- */
+    N([id.vcc, 1], [id.pclo, 1], [id.pchi, 1], [id.pclo, 10]);
+    N([id.pclo, 15], [id.pchi, 10]);               // 级联: 低级 RCO → 高级 ENT
+    N([id.vcc, 1], [id.stp, 7], [id.stp, 9], [id.stp, 10]);
+    N([id.vcc, 1], [id.kcnt, 7], [id.kcnt, 9], [id.kcnt, 10]);
+    N([id.vcc, 1], [id.regalo, 2], [id.regahi, 2], [id.rblo, 2], [id.rbhi, 2]);   // 74175 ~CLR
+    N([id.vcc, 1], [id.pcbuf, 1], [id.alubuf, 1]);
+    N([id.vcc, 1], [id.flags, 1], [id.flags, 4], [id.flags, 10], [id.flags, 12]);
+    N([id.vcc, 1], [id.keyf, 2], [id.keyf, 4], [id.keyf, 10], [id.keyf, 13]);
+    N([id.gnd, 1], [id.stp, 3], [id.stp, 4], [id.stp, 5], [id.stp, 6]);
+    N([id.gnd, 1], [id.kcnt, 3], [id.kcnt, 4], [id.kcnt, 5], [id.kcnt, 6]);
+    N([id.gnd, 1], [id.rom, 9], [id.mc0, 9], [id.mc1, 9], [id.mc2, 9]);
+    N([id.gnd, 1], [id.mc0, 10], [id.mc1, 10], [id.mc2, 10]);   // 控制 ROM 常选通
+    N([id.gnd, 1], [id.ram, 9], [id.ram, 10], [id.ram, 11], [id.ram, 21]);
+    N([id.gnd, 1], [id.mar, 1], [id.outR, 1], [id.port, 1]);
+    N([id.gnd, 1], [id.ir, 1]);    // IR 常驱动 (仅喂控制 ROM 地址, 不上总线)
+    N([id.gnd, 1], [id.port, 12], [id.port, 13], [id.port, 14], [id.port, 15], [id.port, 16], [id.port, 17]);
+    N([id.gnd, 1], [id.keyf, 11], [id.keyf, 12]);
     return b;
   },
 });

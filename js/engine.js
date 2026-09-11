@@ -120,6 +120,8 @@ class Engine {
       _evalQueued: false,
       powered: true,             // 供电标志 (面包板模式按电源脚连通性更新)
     };
+    // defaults.mem 数组是原型共享的, 实例必须分离拷贝 (否则 RAM/ROM 内容跨实例串扰)
+    if (ch.props && ch.props.mem && ch.props.mem === d.defaults.mem) ch.props.mem = ch.props.mem.slice();
     d.pins.forEach((p, i) => {
       const pin = {
         num: p.num, name: p.name, dir: p.dir, side: p.side,

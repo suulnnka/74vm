@@ -305,6 +305,10 @@ function deriveWires(sim, jumpers) {
  *  有源虚拟元件 = 行两端隐式腿; 其余返回 null */
 function powerHoles(ch) {
   if (!ch.bb) return null;
+  const d0 = LIBREF()[ch.type];
+  // 理想化存储模型 (74S472/6116/74187/74189): 引脚为压缩编号且无电源脚,
+  // 供电腿猜测会落在信号脚所在列上造成短路 — 视为常供电, 不生成供电跳线
+  if (d0 && d0.mem && !d0.pwr) return null;
   if (ch.bb.kind === 'dip') {
     const d = LIBREF()[ch.type];
     if (d && d.pwr) return { gnd: pinHole(ch, d.pwr.gnd), vcc: pinHole(ch, d.pwr.vcc) };
@@ -366,19 +370,43 @@ function autoPlace(sim) {
     ch.bb = { kind: 'dip', board, col: Math.min(col, COLS - span + 1), flip: (ch.bb && ch.bb.flip) || false };
     col += span + 1;
   }
-  // IO 元件: VCC/GND 上电源轨, 其余放 a 行 (放不下换下一块板)
-  let railColP = 2, railColN = 2, rowCol = col, rowBoard = board;
+  // IO 元件: VCC/GND 上电源轨, 其余放 a 行 — 只能落在不含 DIP 引脚的列
+  // (DIP 引脚占 e/f 行, 所在列组 a~e 连通; IO 腿落进同列会与 DIP 引脚直接短路)
+  const dipCols = new Map();   // board → Set(DIP 引脚列)
+  for (const ch of dips) {
+    const b = ch.bb.board, s = dipSpan(ch);
+    if (!dipCols.has(b)) dipCols.set(b, new Set());
+    const set = dipCols.get(b);
+    for (let c = ch.bb.col; c < ch.bb.col + s; c++) set.add(c);
+  }
+  const ioCols = new Map();    // board → Set(IO 腿列)
+  let railColP = 2, railColN = 2, rowBoard = 0, rowCol = 2;
   for (const ch of ios) {
     const n = legCount(ch);
     if (ch.type === 'VCC') { ch.bb = { kind: 'rail', board: 0, rail: 'R1', col: railColP }; railColP += 3; }
     else if (ch.type === 'GND') { ch.bb = { kind: 'rail', board: 0, rail: 'R2', col: railColN }; railColN += 3; }
     else {
-      if (rowCol + n - 1 > COLS) {
-        if (rowBoard < BOARDS - 1) rowBoard++;
-        rowCol = 2;
+      let placed = false;
+      outer:
+      for (let b = 0; b < BOARDS; b++) {
+        if (!ioCols.has(b)) ioCols.set(b, new Set());
+        const used = ioCols.get(b);
+        for (let c = 2; c + n - 1 <= COLS; c++) {
+          let ok = true;
+          for (let k = 0; k < n; k++)
+            if ((dipCols.get(b) && dipCols.get(b).has(c + k)) || used.has(c + k)) { ok = false; c += k; break; }
+          if (ok) {
+            ch.bb = { kind: 'row', board: b, row: 'a', col: c };
+            for (let k = 0; k < n; k++) used.add(c + k);
+            placed = true;
+            break outer;
+          }
+        }
       }
-      ch.bb = { kind: 'row', board: rowBoard, row: 'a', col: rowCol };
-      rowCol += n + 1;
+      if (!placed) ch.bb = { kind: 'row', board: rowBoard, row: 'a', col: Math.min(rowCol, COLS - 1) };
+      else {
+        rowBoard = ch.bb.board; rowCol = ch.bb.col + n;
+      }
     }
   }
   return true;
@@ -433,10 +461,24 @@ function autoWire(sim, schematicWires) {
     if (!ph) continue;
     for (const h of [ph.vcc, ph.gnd]) for (const hk of groupHoles(groupOf(h))) pwrBlocked.add(hk);
   }
+  // 孔位 → 引脚: 星形取点须避开其他网络的引脚孔, 否则跳线会短路别的网络
+  const pinAt = new Map();
+  for (const ch of sim.chips.values()) {
+    if (!ch.bb) continue;
+    for (const p of ch.pins) {
+      const h = pinHole(ch, p.num);
+      if (h) pinAt.set(h, ch.id + ':' + p.num);
+    }
+  }
 
   let warn = 0;
-  for (const pins of nets.values()) {
+  for (const [root, pins] of nets) {
     if (pins.length < 2) continue;
+    // 该孔若承载其他网络的引脚则不可作星形取点
+    const foreign = h => {
+      const q = pinAt.get(h);
+      return q != null && find(q) !== root;
+    };
     // VCC/GND 引脚排最前 (走轨)
     pins.sort((a, b) => (LIB_isPower(a.chip.type) ? 0 : 1) - (LIB_isPower(b.chip.type) ? 0 : 1));
     const p0 = pins[0];
@@ -456,10 +498,10 @@ function autoWire(sim, schematicWires) {
         const near = +dst.slice(di + 2) || 8;   // dst = "b:e12" → 列号
         src = railFreeCol(board, rail, near);
       } else {
-        // 在 h0 的连通组内找空闲孔 (避开电源列)
+        // 在 h0 的连通组内找空闲孔 (避开电源列与其他网络引脚孔)
         const holes = groupHoles(groupOf(h0));
-        src = holes.find(h => !used.get(h) && !pwrBlocked.has(h)) ||
-              holes.find(h => (used.get(h) || 0) < 2 && !pwrBlocked.has(h)) ||
+        src = holes.find(h => !used.get(h) && !pwrBlocked.has(h) && !foreign(h)) ||
+              holes.find(h => (used.get(h) || 0) < 2 && !pwrBlocked.has(h) && !foreign(h)) ||
               h0;
         if (src === h0 && (used.get(h0) || 0) >= 2) warn++;
       }
