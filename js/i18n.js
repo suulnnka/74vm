@@ -4,13 +4,23 @@
  *   I18N.tf(s, params) 先翻译再替换 {x} 占位符
  *   I18N.setLang(l)    切换并持久化 ('zh' | 'en'), 调用方负责刷新界面
  *   I18N.EN_HELP       英文版帮助正文 (index.html #helpBody 的 innerHTML)
+ * 初始语言: 优先取 localStorage 已保存值, 否则跟随本地语言 (首选语言非中文一律英文)
  * ========================================================================= */
 (function (global) {
 'use strict';
 
 const LS_KEY = '74vm_lang';
-let lang = 'zh';
-try { lang = localStorage.getItem(LS_KEY) === 'en' ? 'en' : 'zh'; } catch (e) { /* 隐私模式等 */ }
+let lang = null;
+try {
+  const saved = localStorage.getItem(LS_KEY);
+  if (saved === 'en' || saved === 'zh') lang = saved;
+} catch (e) { /* 隐私模式等 */ }
+if (!lang) {
+  // 未手动选过语言时跟随本地语言: 首选语言为中文则中文, 其余一律英文
+  const nav = typeof navigator !== 'undefined' ? navigator : {};
+  const prefs = (nav.languages && nav.languages.length) ? nav.languages : [nav.language || ''];
+  lang = prefs.some(l => String(l).toLowerCase().indexOf('zh') === 0) ? 'zh' : 'en';
+}
 
 function t(s) {
   if (lang === 'zh') return s;

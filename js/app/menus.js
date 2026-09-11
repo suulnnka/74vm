@@ -308,7 +308,9 @@ function loadExample(ex) {
   if (sim.chips.size) pushUndo();
   sim.load({ chips: ex.build().chips, wires: ex.build().wires });
   for (const ch of sim.chips.values()) { ch.x = snap(ch.x); ch.y = snap(ch.y); }   // 示例坐标吸附 28px 网格
-  syncSchematicWires();
+  // 无条件同步原理图网表: syncSchematicWires 在面包板模式下是 no-op (防派生网表误存),
+  // 否则 bbAutoAll 会按上一个电路的旧网表自动布线, 导致示例跳线缺失/错乱
+  app.schematicWires = sim.wiresRaw();
   // 示例可声明面包板规模 bb: {cols, boards} (大电路需要更大的板)
   if (ex.bb) { BB.setCols(ex.bb.cols); BB.setBoards(ex.bb.boards); }
   // 重置面包板接线状态 (新电路需要重新摆放/接线)

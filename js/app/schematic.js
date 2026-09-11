@@ -5,7 +5,7 @@
 'use strict';
   /* 共享上下文 (core.js 挂载) */
   const {
-    sim, app, LIB, canvas, ctx, holder, tooltipEl, ctxMenu,
+    sim, app, LIB, canvas, ctx, holder, tooltipEl, ctxMenu, ghostCv, gctx, resizeGhostCv,
     t, tf, PIN_GAP, DEFAULT_W, DPR, COL, CURSORS, ZOOM_LIM, KB44_CELL, KB44_GAP, KB44_GLYPH, LS_KEY,
     snap, rr, evenCells, chipSize, rotXY, pinLocal, pinWorld, pinNormal, chipHalf, chipPointLocal,
     kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, connColor, pinValue, toWorld, resizeCanvas,
@@ -553,73 +553,86 @@ function drawWiringPreview() {
   ctx.setLineDash([]);
 }
 
+/* 元件库拖拽鬼影: 画在全屏浮层 #ghostcv (显示优先级高于左侧栏等界面) 而非画布 —
+ * 画布与侧栏并排, 鼠标还在侧栏上时局部坐标为负, 鬼影会被画布边缘裁掉, 看起来像被侧栏盖住 */
+let ghostOverlayDirty = false;   // 浮层上有残影, 拖拽结束后清除一次
 function drawGhost() {
-  if (!app.ghost || app.ghost.hidden) return;
+  if (!app.ghost || app.ghost.hidden || !LIB[app.ghost.type]) {
+    if (ghostOverlayDirty) {
+      gctx.setTransform(1, 0, 0, 1, 0, 0);
+      gctx.clearRect(0, 0, ghostCv.width, ghostCv.height);
+      ghostOverlayDirty = false;
+    }
+    return;
+  }
   const def = LIB[app.ghost.type];
-  if (!def) return;
-  // 光标位于预览盒正中央: (gx, gy) = 鼠标的画布局部坐标, 各盒以此为中心绘制
-  const cr = canvas.getBoundingClientRect();
-  const gx = app.ghost.sx - cr.left, gy = app.ghost.sy - cr.top;
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.globalAlpha = 0.92;
-  ctx.textBaseline = 'middle';
+  resizeGhostCv();
+  gctx.setTransform(1, 0, 0, 1, 0, 0);
+  gctx.clearRect(0, 0, ghostCv.width, ghostCv.height);
+  ghostOverlayDirty = true;
+  // 浮层铺满视口 → 局部坐标 = 客户端坐标; 光标位于预览盒正中央, 各盒以此为中心绘制
+  const gx = app.ghost.sx, gy = app.ghost.sy;
+  const g = gctx;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  g.globalAlpha = 0.92;
+  g.textBaseline = 'middle';
 
   if (app.mode === 'breadboard') {
     // 迷你面包板形态: DIP 黑条 / IO 模块
     if (!def.custom) {
       const w = 76, h = 22;
-      ctx.fillStyle = '#2b3138';
-      rr(gx - w / 2, gy - h / 2, w, h, 4); ctx.fill();
-      ctx.strokeStyle = '#454e59'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = '#e6eef8';
-      ctx.font = 'bold 10px Consolas, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(def.type, gx, gy);
-      ctx.fillStyle = '#6b7a8c';
-      ctx.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
-      ctx.fillText(t(def.desc), gx, gy + h / 2 + 9);
+      g.fillStyle = '#2b3138';
+      rr(gx - w / 2, gy - h / 2, w, h, 4, g); g.fill();
+      g.strokeStyle = '#454e59'; g.lineWidth = 1; g.stroke();
+      g.fillStyle = '#e6eef8';
+      g.font = 'bold 10px Consolas, monospace';
+      g.textAlign = 'center';
+      g.fillText(def.type, gx, gy);
+      g.fillStyle = '#6b7a8c';
+      g.font = '9px "Segoe UI","Microsoft YaHei",sans-serif';
+      g.fillText(t(def.desc), gx, gy + h / 2 + 9);
     } else {
       const w = 44, h = 20;
-      ctx.fillStyle = '#242c36';
-      rr(gx - w / 2, gy - h / 2, w, h, 4); ctx.fill();
-      ctx.strokeStyle = '#454e59'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = '#e6eef8';
-      ctx.font = 'bold 9px Consolas, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(def.type, gx, gy);
+      g.fillStyle = '#242c36';
+      rr(gx - w / 2, gy - h / 2, w, h, 4, g); g.fill();
+      g.strokeStyle = '#454e59'; g.lineWidth = 1; g.stroke();
+      g.fillStyle = '#e6eef8';
+      g.font = 'bold 9px Consolas, monospace';
+      g.textAlign = 'center';
+      g.fillText(def.type, gx, gy);
     }
   } else if (app.mode === 'pcb') {
     // 迷你封装: 丝印框 + 双排焊盘
     const w = 40, h = 22;
-    ctx.strokeStyle = '#43566a'; ctx.lineWidth = 1.2;
-    ctx.strokeRect(gx - w / 2, gy - h / 2, w, h);
-    ctx.fillStyle = '#c9a34e';
+    g.strokeStyle = '#43566a'; g.lineWidth = 1.2;
+    g.strokeRect(gx - w / 2, gy - h / 2, w, h);
+    g.fillStyle = '#c9a34e';
     for (let i = 0; i < 3; i++) {
       for (const px of [gx - w / 2 + 7, gx + w / 2 - 7]) {
-        ctx.beginPath();
-        ctx.arc(px, gy - h / 2 + 5 + i * 6, 2.2, 0, Math.PI * 2);
-        ctx.fill();
+        g.beginPath();
+        g.arc(px, gy - h / 2 + 5 + i * 6, 2.2, 0, Math.PI * 2);
+        g.fill();
       }
     }
-    ctx.fillStyle = '#1f2937';
-    ctx.font = 'bold 9px Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(def.type, gx, gy - h / 2 - 7);
+    g.fillStyle = '#1f2937';
+    g.font = 'bold 9px Consolas, monospace';
+    g.textAlign = 'center';
+    g.fillText(def.type, gx, gy - h / 2 - 7);
   } else {
     // 原理图形态: 白底元件盒
     const w = 104, h = 40;
-    ctx.fillStyle = '#ffffff';
-    rr(gx - w / 2, gy - h / 2, w, h, 6); ctx.fill();
-    ctx.strokeStyle = COL.sel; ctx.lineWidth = 1.4; ctx.stroke();
-    ctx.fillStyle = '#1f2937';
-    ctx.font = 'bold 12px Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(def.type, gx, gy - 7);
-    ctx.fillStyle = '#6b7a8c';
-    ctx.font = '9.5px "Segoe UI","Microsoft YaHei",sans-serif';
-    ctx.fillText(t(def.desc), gx, gy + 8);
+    g.fillStyle = '#ffffff';
+    rr(gx - w / 2, gy - h / 2, w, h, 6, g); g.fill();
+    g.strokeStyle = COL.sel; g.lineWidth = 1.4; g.stroke();
+    g.fillStyle = '#1f2937';
+    g.font = 'bold 12px Consolas, monospace';
+    g.textAlign = 'center';
+    g.fillText(def.type, gx, gy - 7);
+    g.fillStyle = '#6b7a8c';
+    g.font = '9.5px "Segoe UI","Microsoft YaHei",sans-serif';
+    g.fillText(t(def.desc), gx, gy + 8);
   }
-  ctx.globalAlpha = 1;
+  g.globalAlpha = 1;
 }
 
 /* ================= 命中测试 ================= */
@@ -1045,7 +1058,7 @@ window.APP.schem = {
   pointerDown: schemPointerDown, pointerMove: schemPointerMove, pointerUp: schemPointerUp,
   contextMenu: schemContextMenu,
   pinAt, chipAt, wireAt, wireEnds, bezierPts, pinWorld,
-  placeChip, fitView, rotateChip, deleteWire, pushUndoLite,
+  placeChip, findFreeSpot, fitView, rotateChip, deleteWire, pushUndoLite,
   deleteSelection, rotateSelection, duplicateSelection,
 };
 })();

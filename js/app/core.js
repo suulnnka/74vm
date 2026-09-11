@@ -16,6 +16,9 @@ const ctx = canvas.getContext('2d');
 const holder = document.getElementById('holder');
 const tooltipEl = document.getElementById('tooltip');
 const ctxMenu = document.getElementById('ctxmenu');
+// 元件库拖拽鬼影浮层 (铺满视口, 高于侧栏; 由 schematic.js 的 drawGhost 绘制)
+const ghostCv = document.getElementById('ghostcv');
+const gctx = ghostCv.getContext('2d');
 
 const sim = new Engine(LIB);
 
@@ -213,14 +216,27 @@ function resizeCanvas() {
   APP.CW = CW; APP.CH = CH;   // 供各模式模块读取 (拖拽/悬浮换算)
 }
 
-function rr(x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
+/* 鬼影浮层尺寸 = 视口 (drawGhost 每帧校验, 窗口缩放时跟随) */
+let GW = 0, GH = 0;
+function resizeGhostCv() {
+  const w = window.innerWidth, h = window.innerHeight;
+  if (GW !== w || GH !== h) {
+    GW = w; GH = h;
+    ghostCv.width = Math.round(w * DPR);
+    ghostCv.height = Math.round(h * DPR);
+  }
+  return { w: GW, h: GH };
+}
+
+function rr(x, y, w, h, r, g) {
+  g = g || ctx;   // 缺省画到主画布; 鬼影浮层等场景可指定上下文
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
 }
 
 function draw() {
@@ -627,7 +643,7 @@ function fmtFreq(f) {
  * app.js 拆分后的各功能模块 (js/app/*.js) 经 window.APP 共享状态与工具;
  * 模块内以解构方式取用 (函数引用不可变, 对象属性运行时读取)。 */
 window.APP = {
-  sim, app, LIB, canvas, ctx, holder, tooltipEl, ctxMenu,
+  sim, app, LIB, canvas, ctx, holder, tooltipEl, ctxMenu, ghostCv, gctx, resizeGhostCv,
   t, tf, PIN_GAP, DEFAULT_W, DPR, COL, CURSORS, ZOOM_LIM, KB44_CELL, KB44_GAP, KB44_GLYPH, LS_KEY,
   snap, rr, evenCells, chipSize, rotXY, pinLocal, pinWorld, pinNormal, chipHalf, chipPointLocal,
   kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, connColor, pinValue, setLevelColor, toWorld, resizeCanvas,
