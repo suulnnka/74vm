@@ -11,7 +11,7 @@
     kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
     isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
-    showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus,
+    showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
     switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
     fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   } = window.APP;
@@ -211,6 +211,15 @@ function memoryMenuItems(ch) {
   ];
 }
 
+/** 查看元件描述: 简述 + 功能描述 (含引脚 IO 说明), 弹窗展示 */
+function showDesc(ch) {
+  const d = LIB[ch.type];
+  Dialog.info({
+    title: (ch.props && ch.props.label ? ch.props.label + ' — ' : '') + d.type,
+    message: t(d.desc) + '\n\n' + (d.detail ? t(d.detail) : ''),
+  });
+}
+
 function editLabelOrFreq(ch) {
   if (ch.type === 'CLOCK' || ch.type === 'NE555') {
     const is555 = ch.type === 'NE555';
@@ -236,7 +245,7 @@ function editLabelOrFreq(ch) {
 }
 
 window.APP.dlg = {
-  editLabel, editLabelOrFreq, memoryMenuItems,
+  editLabel, editLabelOrFreq, memoryMenuItems, showDesc,
   editMem, memSnapshot, exportMem,
   editLcdText, editLcd12864Text, clearLcd, clearLcd12864Gfx,
   copyLcdText, exportLcdText,

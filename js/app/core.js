@@ -503,7 +503,58 @@ function downloadBlob(text, filename) {
   URL.revokeObjectURL(a.href);
 }
 
-function hideTooltip() { tooltipEl.style.display = 'none'; }
+function hideTooltip() {
+  cancelHoverDetail();   // 连同待显定时/样式一并撤下 (函数声明提升, 详见下方浮窗一节)
+  tooltipEl.style.display = 'none';
+}
+
+/* ================= 元件功能描述浮窗 =================
+ * 悬停在元件 (画布上的芯片 / 侧栏条目) 上停留 HOVER_DELAY 后,
+ * 显示 detail 功能描述; 显示期间跟随鼠标; 离开元件或任何 hideTooltip 时消失。
+ * 与引脚提示共用 #tooltip: cancelHoverDetail 只撤下浮窗状态并复位样式, 不强制隐藏;
+ * hideTooltip = cancelHoverDetail + 隐藏, 故既有调用点 (切模式/拖拽/接线) 自动兼容。 */
+const HOVER_DELAY = 600;
+let hdTimer = 0, hdKey = null, hdShown = false, hdLastEvt = null;
+function hdPosition(e) {
+  const r = holder.getBoundingClientRect();
+  let x = e.clientX - r.left + 14, y = e.clientY - r.top + 16;
+  const w = tooltipEl.offsetWidth, h = tooltipEl.offsetHeight;
+  if (x + w > r.width - 8) x = Math.max(8, e.clientX - r.left - w - 12);
+  if (y + h > r.height - 8) y = Math.max(8, e.clientY - r.top - h - 12);
+  tooltipEl.style.left = x + 'px';
+  tooltipEl.style.top = y + 'px';
+}
+/** 指针移动时持续调用: ch 为悬停中的元件实例或 {type} 库条目伪对象, null = 无悬停 */
+function hoverDetail(ch, e) {
+  if (!ch || !LIB[ch.type] || !LIB[ch.type].detail) { hideTooltip(); return; }
+  hdLastEvt = e;
+  if (hdKey === ch.id) { if (hdShown) hdPosition(e); return; }   // 同一元件: 已显示则跟随
+  hideTooltip();
+  hdKey = ch.id;
+  hdTimer = setTimeout(() => {
+    hdTimer = 0;
+    const def = LIB[ch.type];
+    if (!def || !def.detail || hdKey !== ch.id) return;
+    tooltipEl.classList.add('desc');
+    tooltipEl.innerHTML = '';
+    const head = document.createElement('b');
+    head.textContent = ch.type + (ch.props && ch.props.label ? ' · ' + ch.props.label : '');
+    const body = document.createElement('div');
+    body.className = 'tt-body';
+    body.textContent = t(def.desc) + '\n' + t(def.detail);
+    tooltipEl.appendChild(head);
+    tooltipEl.appendChild(body);
+    tooltipEl.style.display = 'block';
+    hdShown = true;
+    hdPosition(hdLastEvt);
+  }, HOVER_DELAY);
+}
+/** 只取消待显定时与样式复位 (引脚提示等即刻显示的场景用, 不隐藏浮窗) */
+function cancelHoverDetail() {
+  if (hdTimer) { clearTimeout(hdTimer); hdTimer = 0; }
+  hdKey = null; hdShown = false;
+  tooltipEl.classList.remove('desc');
+}
 
 /* 高对比自定义光标 (深色图形+白色光晕, 浅色/深色背景均清晰) */
 const CURSORS = (() => {
@@ -567,7 +618,7 @@ window.APP = {
   kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
   isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
   buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
-  showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus,
+  showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
   switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
   fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   CW: 0, CH: 0,          // 画布 CSS 尺寸 (resizeCanvas 维护)

@@ -11,11 +11,11 @@
     kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
     isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
-    showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus,
+    showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
     switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
     fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   } = window.APP;
-  const { editLabel, editLabelOrFreq, memoryMenuItems } = APP.dlg;
+  const { editLabel, editLabelOrFreq, memoryMenuItems, showDesc } = APP.dlg;
   const { setKbFocus, scriptItems: ps2ScriptItems } = APP.ps2;
 
 function drawGrid(z) {
@@ -747,7 +747,7 @@ function schemPointerMove(e) {
 
   if (app.wiring) {
     app.wiring.cursor = w;
-    updateHover(w);
+    updateHover(w, e);
     canvas.style.cursor = CURSORS.cross;
     return;
   }
@@ -783,12 +783,13 @@ function schemPointerMove(e) {
     return;
   }
 
-  updateHover(w);
+  updateHover(w, e);
 }
 
-function updateHover(w) {
+function updateHover(w, e) {
   const pinHit = pinAt(w);
   if (pinHit) {
+    cancelHoverDetail();   // 引脚提示即刻显示, 撤下功能描述浮窗状态
     app.hover = { kind: 'pin', ch: pinHit.ch, pin: pinHit.pin };
     const def = LIB[pinHit.ch.type];
     const dirTxt = t(pinHit.pin.dir === 'in' ? '输入' : pinHit.pin.dir === 'out' ? '输出' : '双向');
@@ -809,10 +810,11 @@ function updateHover(w) {
     canvas.style.cursor = CURSORS.pointer;
     return;
   }
-  tooltipEl.style.display = 'none';
+  hoverDetail(null);   // 无引脚命中: 撤下浮窗 (含待显定时)
   const ch = chipAt(w);
   if (ch) {
     app.hover = { kind: 'chip', id: ch.id };
+    hoverDetail(ch, e);   // 悬停停留后显示功能描述浮窗
     canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2' || ch.type === 'KB44') ? CURSORS.pointer : CURSORS.grab;
     return;
   }
@@ -892,6 +894,7 @@ function schemContextMenu(e) {
   if (ch) {
     const items = [];
     items.push({ text: t('旋转 90° (R)'), fn: () => rotateChip(ch) });
+    items.push({ text: t('查看描述'), fn: () => showDesc(ch) });
     if (ch.type === 'CLOCK') items.push({ text: t('编辑频率…'), fn: () => editLabelOrFreq(ch) });
     items.push({ text: t('编辑标签…'), fn: () => editLabel(ch) });
     if (ch.type === 'PS2') items.push({ text: app.kbChip === ch ? t('退出打字 (Esc)') : t('聚焦打字…'), fn: () => setKbFocus(app.kbChip === ch ? null : ch) });

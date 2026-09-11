@@ -11,11 +11,11 @@
     kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
     isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
-    showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus,
+    showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
     switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
     fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   } = window.APP;
-  const { editLabel, editLabelOrFreq, memoryMenuItems } = APP.dlg;
+  const { editLabel, editLabelOrFreq, memoryMenuItems, showDesc } = APP.dlg;
   const { drawTray } = APP.bb;
 
 function fitPCB() {
@@ -95,10 +95,21 @@ function pcbPointerMove(e) {
     return;
   }
   const ch = pcbChipAt(w);
-  if (ch) { app.hover = { kind: 'chip', id: ch.id }; canvas.style.cursor = CURSORS.grab; return; }
+  if (ch) {
+    app.hover = { kind: 'chip', id: ch.id };
+    canvas.style.cursor = CURSORS.grab;
+    hoverDetail(ch, e);   // 悬停停留后显示功能描述浮窗
+    return;
+  }
   const tray = trayItemAt(w, 'pcb');
-  if (tray) { app.hover = { kind: 'chip', id: tray.ch.id }; canvas.style.cursor = CURSORS.grab; return; }
+  if (tray) {
+    app.hover = { kind: 'chip', id: tray.ch.id };
+    canvas.style.cursor = CURSORS.grab;
+    hoverDetail(tray.ch, e);
+    return;
+  }
   app.hover = null;
+  hideTooltip();
   canvas.style.cursor = CURSORS.def;
 }
 
@@ -114,7 +125,10 @@ function pcbContextMenu(e) {
   const tray = trayItemAt(w, 'pcb');
   if (tray) {
     selectOnly('chip', tray.ch.id);
-    showCtxMenu(e.clientX, e.clientY, [{ text: t('删除'), fn: () => deleteChip(tray.ch) }]);
+    showCtxMenu(e.clientX, e.clientY, [
+      { text: t('查看描述'), fn: () => showDesc(tray.ch) },
+      { text: t('删除'), fn: () => deleteChip(tray.ch) },
+    ]);
     return;
   }
   const ch = pcbChipAt(w);
@@ -122,6 +136,7 @@ function pcbContextMenu(e) {
     selectOnly('chip', ch.id);
     showCtxMenu(e.clientX, e.clientY, [
       { text: t('旋转 90° (R)'), fn: () => pcbRotate(ch) },
+      { text: t('查看描述'), fn: () => showDesc(ch) },
       ...(ch.type === 'CLOCK' ? [{ text: t('编辑频率…'), fn: () => editLabelOrFreq(ch) }] : []),
       { text: t('编辑标签…'), fn: () => editLabel(ch) },
       ...memoryMenuItems(ch),

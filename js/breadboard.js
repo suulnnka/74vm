@@ -121,6 +121,9 @@ const ACTIVE_CUSTOM = { CLOCK: true, PS2: true };
 const isActiveCustom = t => !!ACTIVE_CUSTOM[t];
 /** 行模块占位腿数 (有源虚拟元件 = 信号脚 + 两侧电源腿) */
 const legCount = ch => ch.pins.length + (isActiveCustom(ch.type) ? 2 : 0);
+/** 行模块盒高: LCD 模块盒加高留出可读屏面 (其余 26, 单脚 18) */
+const ROW_BOX_H = { LCD1602: 64, LCD12864: 96 };
+const rowBoxH = ch => legCount(ch) === 1 ? ROW_IO_W : (ROW_BOX_H[ch.type] || 26);
 
 /** 元件某引脚所在孔位 (未放置返回 null); DIP 按物理引脚号定位, 电源脚位置空置 */
 function pinHole(ch, pinNum) {
@@ -192,9 +195,9 @@ function chipRect(ch) {
     const w = (n - 1) * PITCH + ROW_IO_W;
     const cx = colX(bb.col) + (n - 1) * PITCH / 2;
     // 上半区(a-e): 盒在孔上方; 下半区(f-j): 盒在孔下方(腿朝上), 不遮中央沟道/DIP
-    // 单脚元件盒 18×18 近方形
+    // 单脚元件盒 18×18 近方形; LCD 盒加高留出屏面
     const lower = ROWS_BOT.includes(bb.row);
-    const bh = n === 1 ? ROW_IO_W : 26;
+    const bh = rowBoxH(ch);
     const boxY = lower ? p0.y + 8 : p0.y - 8 - bh;
     return { x: cx - w / 2, y: lower ? p0.y - 8 : boxY, w, h: bh + 8 };
   }
@@ -538,7 +541,7 @@ const BB = {
   colX, holePos, groupOf, groupHoles, physPins, dipSpan, pinHole, chipHoles, chipRect,
   occupancy, dipColsFree, computeNets, deriveWires, autoPlace, autoWire,
   powerHoles, netPower, holeNetPower, chipPowered,
-  isActiveCustom, legCount, rowLegs,
+  isActiveCustom, legCount, rowLegs, rowBoxH,
 };
 global.BB = BB;
 if (typeof module !== 'undefined' && module.exports) module.exports = { BB };

@@ -9,8 +9,8 @@
 'use strict';
 
 const {
-  app, sim, LIB, canvas, t, tf, toast, scheduleSave, doSave,
-  hideCtxMenu, toWorld, clearSelection, switchMode, toggleRun, undo, redo,
+  app, sim, LIB, canvas, t, tf, toast, scheduleSave, doSave, restoreSave,
+  hideCtxMenu, hideTooltip, toWorld, clearSelection, switchMode, toggleRun, undo, redo,
   syncRun, applyLang, loadExample, ZOOM_LIM, LS_KEY, draw,
 } = window.APP;
 const { pointerDown: schemDown, pointerMove: schemMove, pointerUp: schemUp,
@@ -30,6 +30,7 @@ const { build: buildLib, setShown: setLibShown, toggle: toggleLib } = window.APP
 
 canvas.addEventListener('pointerdown', e => {
   hideCtxMenu();
+  hideTooltip();   // 按下即撤下功能描述/引脚浮窗
   if (e.button === 2) {   // 右键: 按住拖动 = 平移视图; 松开未拖动 = 弹出菜单
     const w = toWorld(e);
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { }

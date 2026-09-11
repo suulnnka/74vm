@@ -232,6 +232,22 @@ console.log('\n[8] 自定义尺寸与模块矩形按格对齐');
   led.bb = { kind: 'row', board: 0, row: 'a', col: 40 };
   const r3 = BB.chipRect(led);
   check('单脚模块宽 = 18px (一个孔宽, 近方形)', r3.w === BB.ROW_IO_W && r3.h === BB.ROW_IO_W + 8, r3.w);
+  const lcd = sim.addChip('LCD1602', 0, 0);
+  lcd.bb = { kind: 'row', board: 0, row: 'a', col: 12 };
+  const r5 = BB.chipRect(lcd);
+  check('LCD1602 盒加高 (rowBoxH), 宽仍随腿跨', r5.h === BB.rowBoxH(lcd) + 8 && BB.rowBoxH(lcd) > 26 && r5.w === 9 * BB.PITCH + BB.ROW_IO_W, [r5.w, r5.h]);
+  check('LCD1602 腿孔都在盒水平范围内', lcd.pins.every(p => {
+    const hp = BB.holePos(BB.pinHole(lcd, p.num));
+    return hp.x >= r5.x && hp.x <= r5.x + r5.w;
+  }));
+  const g64 = sim.addChip('LCD12864', 0, 0);
+  g64.bb = { kind: 'row', board: 0, row: 'j', col: 12 };
+  const r6 = BB.chipRect(g64);
+  check('LCD12864 盒加高且盒体位于腿孔下方', BB.rowBoxH(g64) > BB.rowBoxH(lcd) && r6.y === BB.holePos('0:j12').y - 8, [r6.h, r6.y]);
+  const clk = sim.addChip('CLOCK', 0, 0);
+  clk.bb = { kind: 'row', board: 0, row: 'a', col: 45 };
+  const r7 = BB.chipRect(clk);
+  check('普通 IO 模块盒高不变 (26+8)', r7.h === 34, r7.h);
   const vcc = sim.addChip('VCC', 0, 0);
   vcc.bb = { kind: 'rail', board: 0, rail: 'R1', col: 10 };
   const r4 = BB.chipRect(vcc);
@@ -286,7 +302,7 @@ console.log('[10] 原理图元件尺寸均为偶数格 (56px 倍数, 边框压�
   check('IO 元件声明尺寸全部 56 倍数', ok, bad);
 }
 
-console.log('\n[8] 存储器 (74187 / 74S472 / 74189 / 6116)');
+console.log('\n[8] 存储器 (74187 / 74S472 / 74189 / 6116 / AT28C64B / AT28C256 / 6264)');
 {
   const sim = new Engine(LIB);
   // 用开关驱动所有控制/地址/数据脚 (无网络的引脚不会触发重评估, 必须真实连线)
@@ -305,6 +321,12 @@ console.log('\n[8] 存储器 (74187 / 74S472 / 74189 / 6116)');
     let v = 0;
     for (let i = 0; i < pins.length; i++) if (sim.pinDisplay(chip.pinByNum[pins[i]]) === 1) v |= 1 << i;
     return v;
+  };
+  // 断开某芯片数据脚上的开关线 (模拟总线释放)
+  const cutData = (chip, dataPins) => {
+    for (const w of [...sim.wires].filter(w =>
+      (w.a.chip === chip && dataPins.includes(w.a.num)) ||
+      (w.b.chip === chip && dataPins.includes(w.b.num)))) sim.removeWire(w.id);
   };
 
   // 74187 — ROM 256×4, 出厂内容 = 地址低 4 位
@@ -351,12 +373,77 @@ console.log('\n[8] 存储器 (74187 / 74S472 / 74189 / 6116)');
   srWE.set(1);                      // /WE=1 读
   check('6116 写 0x5A @0x7FF 读回 0x5A', readD(sr, LIB['6116'].mem.data) === 0x5A);
 
+  // AT28C64B — EEPROM 8K×8, 真实 DIP-28 引脚, /CE /OE /WE 低有效, /WE=0 电改写
+  const e64 = sim.addChip('AT28C64B', 0, 0);
+  check('AT28C64B 物理 28 脚 DIP (跨 14 列)', BB.physPins(e64) === 28 && BB.dipSpan(e64) === 14);
+  check('AT28C64B 真实电源脚 pwr = VCC28/GND14', LIB['AT28C64B'].pwr && LIB['AT28C64B'].pwr.vcc === 28 && LIB['AT28C64B'].pwr.gnd === 14);
+  e64.bb = { kind: 'dip', board: 0, col: 20, flip: false };
+  const ph64 = BB.powerHoles(e64);
+  check('AT28C64B 供电腿孔位 VCC→0:f20 / GND→0:e33', ph64 && ph64.vcc === '0:f20' && ph64.gnd === '0:e33', ph64);
+  e64.bb = null;
+  const e64A = swBus(e64, LIB['AT28C64B'].mem.addr);
+  const e64CE = swBus(e64, [20]), e64OE = swBus(e64, [22]), e64WE = swBus(e64, [27]);
+  e64CE.set(0); e64OE.set(0); e64WE.set(1);
+  e64A.set(0x1234);
+  check('AT28C64B 地址 0x1234 出厂读出 0x34 (内容=地址低8位)', readD(e64, LIB['AT28C64B'].mem.data) === 0x34);
+  const e64D = swBus(e64, LIB['AT28C64B'].mem.data);
+  e64D.set(0x9D);
+  e64WE.set(0); e64WE.set(1);       // /WE=0 电改写 (EEPROM 像 SRAM 一样可写)
+  cutData(e64, LIB['AT28C64B'].mem.data);
+  check('AT28C64B /WE=0 写 0x9D @0x1234 读回', readD(e64, LIB['AT28C64B'].mem.data) === 0x9D);
+  e64A.set(0x0234);                 // A12=0: 另一单元, 仍为出厂值 (证明 A12 参与译码)
+  check('AT28C64B A12 参与译码 (0x0234 读出厂 0x34)', readD(e64, LIB['AT28C64B'].mem.data) === 0x34);
+  e64CE.set(1);
+  check('AT28C64B /CE=1 数据线高阻', sim.pinDisplay(e64.pinByNum[11]) === 'Z');
+  e64CE.set(0);
+
+  // AT28C256 — EEPROM 32K×8, 高位地址 A13 (26 脚) / A14 (1 脚) 参与译码
+  const e2 = sim.addChip('AT28C256', 0, 0);
+  check('AT28C256 物理 28 脚 DIP + 真实电源脚', BB.physPins(e2) === 28 && LIB['AT28C256'].pwr.vcc === 28 && LIB['AT28C256'].pwr.gnd === 14);
+  const e2A = swBus(e2, LIB['AT28C256'].mem.addr);
+  const e2CE = swBus(e2, [20]), e2OE = swBus(e2, [22]), e2WE = swBus(e2, [27]);
+  e2CE.set(0); e2OE.set(0); e2WE.set(1);
+  e2A.set(0x3FFF);
+  check('AT28C256 地址 0x3FFF 出厂读出 0xFF', readD(e2, LIB['AT28C256'].mem.data) === 0xFF);
+  const e2D = swBus(e2, LIB['AT28C256'].mem.data);
+  e2D.set(0xAB);
+  e2WE.set(0); e2WE.set(1);         // 写 0xAB @0x3FFF (A14=0, A13=1)
+  cutData(e2, LIB['AT28C256'].mem.data);
+  e2A.set(0x7FFF);                  // A14=1: 不同单元, 出厂 0xFF
+  check('AT28C256 A14 参与译码 (0x7FFF 读 0xFF 非 0xAB)', readD(e2, LIB['AT28C256'].mem.data) === 0xFF);
+  e2A.set(0x3FFF);
+  check('AT28C256 0x3FFF 读回 0xAB', readD(e2, LIB['AT28C256'].mem.data) === 0xAB);
+  e2OE.set(1);
+  check('AT28C256 /OE=1 数据线高阻', sim.pinDisplay(e2.pinByNum[11]) === 'Z');
+  e2OE.set(0);
+
+  // 6264 — SRAM 8K×8, 双片选: /CS1 (20 脚) 低有效 + CS2 (26 脚) 高有效
+  const s6 = sim.addChip('6264', 0, 0);
+  check('6264 物理 28 脚 DIP + 真实电源脚', BB.physPins(s6) === 28 && LIB['6264'].pwr.vcc === 28 && LIB['6264'].pwr.gnd === 14);
+  const s6A = swBus(s6, LIB['6264'].mem.addr);
+  const s6D = swBus(s6, LIB['6264'].mem.data);
+  const s6CS = swBus(s6, [20]), s6CS2 = swBus(s6, [26]), s6OE = swBus(s6, [22]), s6WE = swBus(s6, [27]);
+  s6A.set(0x001); s6D.set(0x5A);
+  s6CS.set(0); s6CS2.set(1); s6OE.set(0);
+  s6WE.set(0); s6WE.set(1);         // 双片选有效时 /WE=0 写入
+  cutData(s6, LIB['6264'].mem.data);
+  check('6264 写 0x5A @1 读回', readD(s6, LIB['6264'].mem.data) === 0x5A);
+  s6CS2.set(0);                     // CS2 高有效: 拉低即失效
+  check('6264 CS2=0 数据线高阻', sim.pinDisplay(s6.pinByNum[11]) === 'Z');
+  s6CS2.set(1);
+  check('6264 CS2=1 恢复读出', readD(s6, LIB['6264'].mem.data) === 0x5A);
+  s6CS.set(1);
+  check('6264 /CS1=1 数据线高阻', sim.pinDisplay(s6.pinByNum[11]) === 'Z');
+
   // 内容随存档保存
   const saved = JSON.parse(JSON.stringify({
     chips: Array.from(sim.chips.values()).map(c => ({ type: c.type, props: c.props })),
   }));
   check('74189 内容随存档保存', saved.chips.find(c => c.type === '74189').props.mem[3] === 0x9);
   check('6116 内容随存档保存', saved.chips.find(c => c.type === '6116').props.mem[0x7FF] === 0x5A);
+  check('AT28C64B 内容随存档保存', saved.chips.find(c => c.type === 'AT28C64B').props.mem[0x1234] === 0x9D);
+  check('AT28C256 内容随存档保存', saved.chips.find(c => c.type === 'AT28C256').props.mem[0x3FFF] === 0xAB);
+  check('6264 内容随存档保存', saved.chips.find(c => c.type === '6264').props.mem[1] === 0x5A);
 
   // 旧通用型号迁移: ROM→74187 / RAM→6116
   const legacy = { chips: [

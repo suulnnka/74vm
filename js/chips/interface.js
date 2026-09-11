@@ -13,17 +13,20 @@ const { LIB, def, L, R } = C;
 const global = C.global;   // 家族内的 global.xxx 导出 (如 ps2ParseScript)
 
 /* ========================= 输入 / 输出元件 ========================= */
-def('SW', '开关·单击切换', '输入/输出', [R(1, 'Q', 'out')], {
+def('SW', '开关', '输入/输出', [R(1, 'Q', 'out')], {
+  detail: '手动开关, 输出并保持 0 或 1。\n引脚: Q 为电平输出; 单击元件在 0/1 间切换。',
   custom: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { const p = ch.pinByNum[1]; p.driven = ch.state.on ? 1 : 0; },
 });
 
-def('BTN', '按键·按住=1', '输入/输出', [R(1, 'Q', 'out')], {
+def('BTN', '按键', '输入/输出', [R(1, 'Q', 'out')], {
+  detail: '瞬时按键, 供人工输入单脉冲。\n引脚: Q 为输出; 按住时输出 1, 松开恢复 0。',
   custom: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 0; },
 });
 
-def('CLOCK', '时钟源·右键改频率', '输入/输出', [R(1, 'CLK', 'out')], {
+def('CLOCK', '时钟源', '输入/输出', [R(1, 'CLK', 'out')], {
+  detail: '方波时钟源, 周期性自动翻转输出。\n引脚: CLK 为时钟输出; 频率可调 (右键 → 编辑频率)。',
   custom: true, hideNums: true, size: { w: 56, h: 56 },
   osc: {},                                  // 无稳态源: 引擎按帧扫描推进 (见 engine.advance)
   defaults: { freq: 2 },
@@ -41,10 +44,11 @@ function ne555OscTick(ch, eng) {
   eng.applyPin(ch.pinByNum[7], ch.state.hi ? VZ : V0);
 }
 
-def('NE555', 'NE555 定时器·时钟(右键改频率)', '输入/输出', [
+def('NE555', 'NE555 定时器', '输入/输出', [
   L(2, 'TRIG', 'in'), L(3, 'OUT', 'out'), L(4, '~RST', 'in'),
   R(7, 'DISCH', 'out'), R(6, 'THRES', 'in'),
 ], {
+  detail: 'NE555 定时器 (无稳态接法), 按设定频率输出方波时钟。\n引脚: 3 OUT 为振荡输出, 4 ~RST 低电平停振并复位, 7 DISCH 为放电端 (输出低电平期间导通), 2 TRIG / 6 THRES 为阈值输入; 频率可调 (右键 → 编辑频率)。',
   pwr: { vcc: 8, gnd: 1 },                  // 真实电源脚位 (非 74 系列约定)
   osc: { tick: ne555OscTick },
   defaults: { freq: 2 },
@@ -57,24 +61,31 @@ def('NE555', 'NE555 定时器·时钟(右键改频率)', '输入/输出', [
 });
 
 def('LED', 'LED 指示灯', '输入/输出', [L(1, 'IN', 'in')], {
+  detail: 'LED 指示灯, 用亮灭显示电平。\n引脚: IN 为逻辑输入, 高电平点亮。',
   custom: true, hideNums: true, size: { w: 56, h: 56 },
 });
 
 def('SEG7', '七段数码管·共阴', '输入/输出', [
   L(1, 'a', 'in'), L(2, 'b', 'in'), L(3, 'c', 'in'), L(4, 'd', 'in'),
   L(5, 'e', 'in'), L(6, 'f', 'in'), L(7, 'g', 'in'), L(8, 'dp', 'in'),
-], { custom: true, hideNums: true, size: { w: 168 } });
+], {
+  detail: '七段数码管 (共阴), 按段码显示字形。\n引脚: a~g 为七段输入, dp 为小数点; 段输入 1 点亮, 可配 7448 译码器。',
+  custom: true, hideNums: true, size: { w: 168 },
+});
 
-def('PROBE', '逻辑探针·显示电平', '输入/输出', [L(1, 'IN', 'in')], {
+def('PROBE', '逻辑探针', '输入/输出', [L(1, 'IN', 'in')], {
+  detail: '逻辑探针, 实时显示被测点的逻辑状态。\n引脚: IN 为被测输入, 显示 1 / 0 / 高阻 Z / 未知 X。',
   custom: true, hideNums: true, size: { w: 56, h: 56 },
 });
 
-def('VCC', '电源 +5V·恒1', '输入/输出', [R(1, '5V', 'out')], {
+def('VCC', '电源 +5V', '输入/输出', [R(1, '5V', 'out')], {
+  detail: '逻辑电源, 提供恒定高电平。\n引脚: 5V 恒输出 1 (+5V)。',
   custom: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 1; },
 });
 
-def('GND', '地 GND·恒0', '输入/输出', [R(1, 'GND', 'out')], {
+def('GND', '地 GND', '输入/输出', [R(1, 'GND', 'out')], {
+  detail: '逻辑地, 提供恒定低电平。\n引脚: GND 恒输出 0。',
   custom: true, hideNums: true, size: { w: 56, h: 56 },
   init(ch) { ch.pinByNum[1].driven = 0; },
 });
@@ -284,9 +295,10 @@ function ps2Tick(ch, e) {
   e.schedule(PS2_HALF, () => ps2Tick(ch, e));
 }
 
-def('PS2', 'PS/2键盘·点击后打字', '输入/输出', [
+def('PS2', 'PS/2 键盘', '输入/输出', [
   R(1, 'CLK', 'out'), R(2, 'DATA', 'out'),
 ], {
+  detail: 'PS/2 键盘, 点击聚焦后用真实键盘打字, 按标准协议发送扫描码。\n引脚: 1 CLK 为时钟输出 (~16.7kHz), 2 DATA 为串行数据; 发送 Set 2 扫描码帧 (起始位 + 8 位数据 LSB 在前 + 奇校验 + 停止位), 按下发 Make 码、松开发 Break 码, 扩展键带 0xE0 前缀。',
   custom: true, hideNums: true, size: { w: 168, h: 112 },
   init(ch) {
     const s = ch.state;
@@ -323,10 +335,11 @@ global.ps2CharCodes = ps2CharCodes;
  * 支持 上拉+列低有效 (经典 74138/74145 扫描) 或 下拉+列高有效 两种极性。
  * state.keys = { "行,列": 1 } 记录按住中的键 (瞬时器件, 不随存档恢复) */
 
-def('KB44', '4×4矩阵键盘·按住按键', '输入/输出', [
+def('KB44', '4×4 矩阵键盘', '输入/输出', [
   L(1, 'C1', 'in'), L(2, 'C2', 'in'), L(3, 'C3', 'in'), L(4, 'C4', 'in'),
   R(5, 'R1', 'out'), R(6, 'R2', 'out'), R(7, 'R3', 'out'), R(8, 'R4', 'out'),
 ], {
+  detail: '4×4 矩阵键盘, 16 键行列扫描, 供主机作键盘扫描接口。\n引脚: C1~C4 为列输入 (接扫描驱动), R1~R4 为行输出 (接读取); 按下的键使对应行列导通, 行脚内置下拉/上拉 (右键可切换极性)。',
   custom: true, hideNums: true, size: { w: 168, h: 168 },
   defaults: { pull: 0 },
   init(ch) {
@@ -411,11 +424,12 @@ function lcdEnsureState(ch) {
   ch.state.prevE = 0;
 }
 
-def('LCD1602', '1602 液晶·内置中文字库', '输入/输出', [
+def('LCD1602', '1602 字符液晶', '输入/输出', [
   L(1, 'RS', 'in'), L(2, 'E', 'in'),
   R(3, 'D0', 'in'), R(4, 'D1', 'in'), R(5, 'D2', 'in'), R(6, 'D3', 'in'),
   R(7, 'D4', 'in'), R(8, 'D5', 'in'), R(9, 'D6', 'in'), R(10, 'D7', 'in'),
 ], {
+  detail: '1602 字符型液晶, 2 行 × 16 字符, HD44780 风格接口, 内置 GB2312 中文字库。\n引脚: 1 RS (1=数据/0=指令), 2 E (上升沿锁存), 3~10 D0~D7 为 8 位数据总线; 常用指令 0x01 清屏、0x80|n 设置显示地址。',
   custom: true, hideNums: true, size: { w: 224, h: 112 },
   init(ch) { lcdEnsureState(ch); },
   eval(ch, e) {
@@ -475,11 +489,12 @@ function lcd12864Ensure(ch) {
   }
 }
 
-def('LCD12864', '12864 图形液晶·中文字库', '输入/输出', [
+def('LCD12864', '12864 图形液晶', '输入/输出', [
   L(1, 'RS', 'in'), L(2, 'E', 'in'),
   R(3, 'D0', 'in'), R(4, 'D1', 'in'), R(5, 'D2', 'in'), R(6, 'D3', 'in'),
   R(7, 'D4', 'in'), R(8, 'D5', 'in'), R(9, 'D6', 'in'), R(10, 'D7', 'in'),
 ], {
+  detail: '12864 图形液晶, ST7920 风格: 文字层 4 行 × 16 字 (中文字库) + 图形层 128×64 点阵。\n引脚: 1 RS (1=数据/0=指令), 2 E (上升沿锁存), 3~10 D0~D7 为 8 位数据总线; 0x30 基本指令集写文字, 0x34/0x36 扩充指令集并可开图形层。',
   custom: true, hideNums: true, size: { w: 280, h: 168 },
   init(ch) { lcd12864Ensure(ch); },
   eval(ch, e) {

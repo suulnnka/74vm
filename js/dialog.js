@@ -92,7 +92,8 @@ const Dialog = (() => {
       btnOk.className = 'btn primary';
       btnOk.textContent = o.okText;
       if (o.danger) btnOk.classList.add('danger');
-      foot.appendChild(btnCancel); foot.appendChild(btnOk);
+      if (!o.hideCancel) foot.appendChild(btnCancel);   // 纯信息弹窗 (info) 不显示取消钮
+      foot.appendChild(btnOk);
 
       box.appendChild(head); box.appendChild(body); box.appendChild(foot);
       overlay.appendChild(box);
@@ -164,6 +165,8 @@ const Dialog = (() => {
     prompt: opts => open(Object.assign({ label: '', validate: null }, opts)),
     /* confirm({...}) → Promise<boolean> */
     confirm: opts => open(Object.assign({ message: '' }, opts)),
+    /* info({title, message}) → Promise<true>: 纯信息查看弹窗, 只有"关闭"按钮 */
+    info: opts => open(Object.assign({ message: '', okText: t('关闭'), hideCancel: true }, opts)),
     /* 关闭全部窗口 (上层先关) */
     closeAll: () => { for (const w of [...wins].reverse()) w.close(null); },
     /* 当前并存窗口数 */

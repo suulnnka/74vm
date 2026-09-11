@@ -11,11 +11,11 @@
     kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
     isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
-    showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus,
+    showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
     switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
     fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   } = window.APP;
-  const { editLabel, editLabelOrFreq, memoryMenuItems } = APP.dlg;
+  const { editLabel, editLabelOrFreq, memoryMenuItems, showDesc } = APP.dlg;
   const { setKbFocus, scriptItems: ps2ScriptItems } = APP.ps2;
   const { pushUndoLite } = APP.schem;
 
@@ -368,11 +368,18 @@ function bbPointerMove(e) {
   }
   // 悬停提示
   const ch = bbChipAt(w);
-  if (ch) { app.hover = { kind: 'chip', id: ch.id }; canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2' || ch.type === 'KB44') ? CURSORS.pointer : CURSORS.grab; hideTooltip(); return; }
+  if (ch) {
+    app.hover = { kind: 'chip', id: ch.id };
+    canvas.style.cursor = (ch.type === 'SW' || ch.type === 'BTN' || ch.type === 'PS2' || ch.type === 'KB44') ? CURSORS.pointer : CURSORS.grab;
+    hideTooltip();
+    hoverDetail(ch, e);   // 悬停停留后显示功能描述浮窗
+    return;
+  }
   const h = bbHoleAt(w);
   if (h) {
     app.hover = { kind: 'bbHole', hole: h };
     canvas.style.cursor = CURSORS.pointer;
+    cancelHoverDetail();   // 孔位提示即刻显示, 撤下功能描述浮窗状态
     const ci = h.indexOf(':');
     const rest = h.slice(ci + 1);
     tooltipEl.textContent = rest[0] === 'R'
@@ -387,7 +394,13 @@ function bbPointerMove(e) {
   const j = bbJumperAt(w);
   if (j) { app.hover = { kind: 'jumper', id: j.id }; canvas.style.cursor = CURSORS.pointer; hideTooltip(); return; }
   const tray = trayItemAt(w, 'breadboard');
-  if (tray) { app.hover = { kind: 'chip', id: tray.ch.id }; canvas.style.cursor = CURSORS.grab; hideTooltip(); return; }
+  if (tray) {
+    app.hover = { kind: 'chip', id: tray.ch.id };
+    canvas.style.cursor = CURSORS.grab;
+    hideTooltip();
+    hoverDetail(tray.ch, e);   // 待放置元件同样可查看功能描述
+    return;
+  }
   app.hover = null;
   hideTooltip();
   canvas.style.cursor = CURSORS.def;
@@ -437,7 +450,10 @@ function bbContextMenu(e) {
   const tray = trayItemAt(w, 'breadboard');
   if (tray) {
     selectOnly('chip', tray.ch.id);
-    showCtxMenu(e.clientX, e.clientY, [{ text: t('删除'), fn: () => deleteChip(tray.ch) }]);
+    showCtxMenu(e.clientX, e.clientY, [
+      { text: t('查看描述'), fn: () => showDesc(tray.ch) },
+      { text: t('删除'), fn: () => deleteChip(tray.ch) },
+    ]);
     return;
   }
   const ch = bbChipAt(w);
@@ -445,6 +461,7 @@ function bbContextMenu(e) {
     selectOnly('chip', ch.id);
     const items = [];
     if (!LIB[ch.type].custom) items.push({ text: t('翻转 180° (R)'), fn: () => bbFlip(ch) });
+    items.push({ text: t('查看描述'), fn: () => showDesc(ch) });
     if (ch.type === 'CLOCK') {
       items.push({ text: t('编辑频率…'), fn: () => editLabelOrFreq(ch) });
       items.push({ text: t('编辑标签…'), fn: () => editLabel(ch) });
@@ -710,7 +727,7 @@ function drawBBChip(ch, z) {
     // IO 模块: 窄盒 (端部一个孔宽, 单脚元件近方形); 上半区盒在孔上方, 下半区盒在孔下方
     const lower = B.ROWS_BOT.includes(ch.bb.row);
     const legs = B.rowLegs(ch);
-    const bh = legs.length === 1 ? B.ROW_IO_W : 26;
+    const bh = B.rowBoxH(ch);
     const boxY = lower ? rect.y + 8 : rect.y;
     const legEnd = lower ? boxY : rect.y + bh;   // 腿靠盒一端
     ctx.fillStyle = '#242c36';
@@ -727,7 +744,8 @@ function drawBBChip(ch, z) {
       ctx.strokeStyle = l.pol === 1 ? '#d9534f' : l.pol === 2 ? '#4a90d9' : '#8ba0b6';
       ctx.beginPath(); ctx.moveTo(hp.x, hp.y); ctx.lineTo(hp.x, legEnd); ctx.stroke();
     }
-    drawIOGlyph(ch, rect.x + rect.w / 2, boxY + bh / 2);
+    if (ch.type === 'LCD1602' || ch.type === 'LCD12864') drawBBLCD(ch, rect.x, boxY, rect.w, bh);
+    else drawIOGlyph(ch, rect.x + rect.w / 2, boxY + bh / 2);
     // 未供电徽标 (有源虚拟元件: CLOCK/PS2)
     let badge = false;
     if (ch.powered === false) {
@@ -782,6 +800,62 @@ function drawBBChip(ch, z) {
     ctx.font = 'bold 8px Consolas, monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(ch.type, rect.x + rect.w / 2, boxY + 9);
+  }
+}
+
+/** LCD 模块大屏 (面包板): 屏面填满加高的模块盒, 显示 DDRAM 文字
+ *  (12864 再叠加 GDRAM 点阵), 渲染风格与原理图模式一致 */
+function drawBBLCD(ch, x, y, w, h) {
+  const m = 4;                                   // 屏面与模块盒的边距
+  const px = x + m, py = y + m, pw = w - m * 2, ph = h - m * 2;
+  ctx.fillStyle = '#0d47a1';
+  rr(px, py, pw, ph, 3);
+  ctx.fill();
+  ctx.strokeStyle = '#093170';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  const dd = ch.state.ddram || [];
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#e3f2fd';
+  if (ch.type === 'LCD1602') {
+    const cw = pw / 16, band = ph / 2;
+    ctx.font = '10px Consolas, "Microsoft YaHei", monospace';
+    for (let row = 0; row < 2; row++) {
+      const base = row === 0 ? 0 : 0x40;
+      for (let c = 0; c < 16; c++) {
+        const t = dd[base + c];
+        if (t && t !== ' ') ctx.fillText(t, px + cw * (c + 0.5), py + band * row + band / 2);
+      }
+    }
+    // 光标 (下划线, 仅可见区)
+    const cur = ch.state.cur || 0;
+    if (cur < 16 || (cur >= 0x40 && cur < 0x50)) {
+      const row = cur >= 0x40 ? 1 : 0;
+      const ccol = cur >= 0x40 ? cur - 0x40 : cur;
+      ctx.fillRect(px + cw * ccol + 1, py + band * row + band - 6, cw - 2, 2);
+    }
+  } else {
+    // 12864: GDRAM 点阵 + DDRAM 文字叠加
+    const g = ch.state.gdram || [];
+    const dw = pw / 128, dh = ph / 64;
+    ctx.fillStyle = '#6ea8e8';
+    for (let yy = 0; yy < 64; yy++) {
+      for (let bx = 0; bx < 16; bx++) {
+        const byte = g[yy * 16 + bx];
+        if (!byte) continue;
+        for (let k = 0; k < 8; k++) {
+          if (byte & (0x80 >> k)) ctx.fillRect(px + (bx * 8 + k) * dw, py + yy * dh, dw + 0.3, dh + 0.3);
+        }
+      }
+    }
+    const cw = pw / 16;
+    ctx.font = '10px Consolas, "Microsoft YaHei", monospace';
+    ctx.fillStyle = '#e3f2fd';
+    for (let row = 0; row < 4; row++) {
+      let s = '';
+      for (let c = 0; c < 16; c++) s += dd[row * 16 + c] || ' ';
+      if (s.trim()) ctx.fillText(s, px + pw / 2, py + (row + 0.5) * ph / 4);
+    }
   }
 }
 
@@ -863,27 +937,6 @@ function drawIOGlyph(ch, cx, cy) {
       ctx.font = 'bold 10px Consolas, monospace';
       ctx.fillStyle = valColor(v);
       ctx.fillText(v === 'Z' ? 'Z' : String(v), cx, cy);
-      break;
-    }
-    case 'LCD12864': {
-      // 迷你图形屏: 蓝底 + 两层内容示意
-      ctx.fillStyle = '#0d47a1';
-      rr(cx - 12, cy - 10, 24, 20, 2); ctx.fill();
-      ctx.font = '5px Consolas, monospace';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#9fc9f5';
-      const dd = ch.state.ddram || [];
-      for (let row = 0; row < 4; row++) {
-        let t = '';
-        for (let c = 0; c < 16; c++) t += dd[row * 16 + c] || ' ';
-        ctx.fillText(t.slice(0, 14), cx - 11, cy - 6 + row * 4.4);
-      }
-      ctx.fillStyle = '#6ea8e8';
-      const g = ch.state.gdram || [];
-      for (let k = 0; k < 16; k++) {          // 顶/底边框点示意
-        if (g[k] & 0x80) ctx.fillRect(cx - 11 + k * 1.5, cy - 9.5, 1.5, 1);
-        if (g[1008 + k] & 0x80) ctx.fillRect(cx - 11 + k * 1.5, cy + 8.5, 1.5, 1);
-      }
       break;
     }
     case 'PS2': {

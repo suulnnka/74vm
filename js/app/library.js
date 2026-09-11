@@ -11,7 +11,7 @@
     kb44CellRect, kb44CellAt, kb44Press, kb44CellAtBB, valColor, pinValue, toWorld, resizeCanvas,
     isSelected, selectOnly, clearSelection, pruneSelection, toast, pushUndo, undo, redo,
     buildSave, restoreSave, syncSchematicWires, scheduleSave, doSave, deleteChip,
-    showCtxMenu, hideCtxMenu, hideTooltip, showModal, modalVisible, closeAllMenus,
+    showCtxMenu, hideCtxMenu, hideTooltip, cancelHoverDetail, hoverDetail, showModal, modalVisible, closeAllMenus,
     switchMode, toggleRun, syncRun, setSpeed, simStep, updateStatus, fmtNum, fmtFreq,
     fitDispatch, rotateDispatch, deleteDispatch, downloadBlob, trayRects, trayItemAt, draw,
   } = window.APP;
@@ -19,7 +19,7 @@
   const { placeChipBB } = APP.bb;
   const { placeChipPCB } = APP.pcb;
 
-const CAT_ORDER = ['输入/输出', '门电路', '组合逻辑', '触发器/锁存', '计数/移位', '存储器', '总线接口'];
+const CAT_ORDER = ['输入/输出', '门电路', '组合逻辑', '触发器/锁存', '计数/移位', 'ROM', 'RAM', '总线接口'];
 function buildLib(filter) {
   const libEl = document.getElementById('lib');
   libEl.innerHTML = '';
@@ -36,7 +36,11 @@ function buildLib(filter) {
       const el = document.createElement('div');
       el.className = 'lib-item';
       el.innerHTML = `<b>${d.type}</b><span>${t(d.desc)}</span>`;
-      el.title = tf('{d} — 点击或拖拽放置', { d: t(d.desc) });
+      // 悬停停留显示功能描述浮窗 (跟随鼠标, 离开消失)
+      const pseudo = { id: 'lib:' + d.type, type: d.type };
+      el.addEventListener('mouseenter', e => hoverDetail(pseudo, e));
+      el.addEventListener('mousemove', e => hoverDetail(pseudo, e));
+      el.addEventListener('mouseleave', () => hideTooltip());
       bindLibItem(el, d.type);
       libEl.appendChild(el);
     }
@@ -61,6 +65,7 @@ function bindLibItem(el, type) {
     // 原生拖放: 影像由合成器跟随鼠标, 不受事件稀疏影响 (首选拖拽通道)
     el.draggable = true;
     el.addEventListener('dragstart', ev => {
+      hideTooltip();   // 开始拖放: 撤下描述浮窗
       if (ev.dataTransfer) {
         try {
           ev.dataTransfer.setData('text/plain', type);
