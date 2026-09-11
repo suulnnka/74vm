@@ -97,7 +97,7 @@ Known limitations: components export as loose pads + silkscreen (not grouped foo
 | 14 | PS/2 scan-code receiver (74164) | keyboard frame bits shift in serially, watch on an LED |
 | 15 | Keypad scanning (74138+7404) | column-by-column scan; holding a key lights the row LED |
 | 16 | 1602 LCD typewriter | toggle RS/D7~D0 + E buttons to hand-write instructions/characters |
-| 17 | VM-8 CPU clock computer | 8-bit microcoded CPU + 1602 clock display + PS/2 time setting + 1Hz real-time clock; the circuit has a **power switch** (gates the clocks and holds reset = cold boot); the program ROM right-click offers **built-in programs** (counter / welcome / typewriter / stopwatch / factory clock); a 248-byte clock program is burned into ROM (built-in assembler, editable); teaching guide: [docs/vm8-guide.md](docs/vm8-guide.md); covered by `test/test-cpu.js` with 123 deep tests (microcode/assembler/instruction-level/keyboard capture/keeping-time integration/power control/program library/three modes) |
+| 17 | VM-8 CPU clock computer | 8-bit microcoded CPU + 1602 clock display + PS/2 time setting + 1Hz real-time clock; the circuit has a **power switch** (gates the clocks and holds reset = cold boot); the program ROM right-click offers **built-in programs** (counter / welcome / typewriter / stopwatch / factory clock); a 248-byte clock program is burned into ROM (built-in assembler, editable); teaching guide: [docs/vm8-guide.md](docs/vm8-guide.md); covered by `test/test-cpu.js` with 134 deep tests (microcode/assembler/instruction-level/keyboard capture/keeping-time integration/power control/program library/three modes) |
 
 ## File structure
 
@@ -116,7 +116,7 @@ js/app.js         rendering & interaction (three-mode views, drag/wire/jumper, u
 docs/vm8-guide.md VM-8 teaching guide (ISA/microcode/RAM & ROM/ROM loading/IO/boot flow)
 test/test-engine.js  engine tests (63 items)
 test/test-modes.js   mode tests (136 items: netlist equivalence/physical pin mapping/memory/power check/export formats)
-test/test-cpu.js     VM-8 CPU deep tests (123 items: microcode/assembler/instruction-level/keyboard capture/full integration/power control/program library/three modes)
+test/test-cpu.js     VM-8 CPU deep tests (134 items: microcode/assembler/instruction-level/keyboard capture/full integration/power control/program library/three modes)
 test/test-i18n.js    i18n tests (14 items: initial-language detection)
 ```
 

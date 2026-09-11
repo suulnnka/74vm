@@ -615,6 +615,55 @@ console.log('\n[十二] 内置程序库 (' + VM8.PROGS.length + ' 个程序)');
     sim2.advance(2050000);
     check('stopwatch: 清零后继续计时', sec() >= 2 && sec() <= 3, sec());
   }
+  // 回绕与状态机边界: 59→00 / 99:59→00:00 / 暂停中清零 / 时十位进位 (RAM 注入后走 1 tick)
+  {
+    const p = VM8.PROGS.find(x => x.id === 'counter');
+    const sim2 = loadCpuMem(p.mem);
+    const ram = byType(sim2, '6116')[0];
+    sim2.advance(80000);
+    ram.props.mem[0x10] = 9; ram.props.mem[0x11] = 5;      // :59
+    sim2.reevalAll();
+    sim2.advance(1300000);
+    check('counter: 59 → 00 回绕', lcdText(sim2) === '00', lcdText(sim2));
+  }
+  {
+    const p = VM8.PROGS.find(x => x.id === 'stopwatch');
+    const sim2 = loadCpuMem(p.mem);
+    const ram = byType(sim2, '6116')[0];
+    sim2.advance(80000);
+    ram.props.mem[0x11] = 9; ram.props.mem[0x12] = 5;      // :59
+    ram.props.mem[0x13] = 9; ram.props.mem[0x14] = 9;      // 99:
+    sim2.reevalAll();
+    sim2.advance(1300000);
+    check('stopwatch: 99:59 → 00:00 回绕', lcdText(sim2).startsWith('00:00'), lcdText(sim2));
+  }
+  {
+    const p = VM8.PROGS.find(x => x.id === 'stopwatch');
+    const sim2 = loadCpuMem(p.mem);
+    const ps2 = byType(sim2, 'PS2')[0];
+    const ram = byType(sim2, '6116')[0];
+    const sec2 = () => ram.props.mem[0x12] * 10 + ram.props.mem[0x11];
+    const key2 = code => { ps2.state.queue.push(code); sim2.reevalAll(); sim2.advance(60000); };
+    sim2.advance(2300000);                                 // 先走 2 秒
+    key2(0x29);                                            // 空格 → 暂停
+    for (let i = 0; i < 4 && sec2() !== 0; i++) key2(0x21); // C 清零 (撞 CLF 窗口丢键时重按)
+    sim2.advance(100000);                                  // 等待 RST+SHOW 全链路刷新 (~70ms)
+    check('stopwatch: 暂停中 C 清零 → 00:00', sec2() === 0 && lcdText(sim2).startsWith('00:00'),
+      [sec2(), lcdText(sim2)]);
+    sim2.advance(2050000);
+    check('stopwatch: 清零后仍暂停 (RUN 未被 C 破坏)', sec2() === 0, sec2());
+  }
+  {
+    const sim2 = loadCpu();                                // 出厂时钟 (默认 ROM)
+    const ram = byType(sim2, '6116')[0];
+    sim2.advance(80000);
+    ram.props.mem[0x10] = 9; ram.props.mem[0x11] = 5;      // :59
+    ram.props.mem[0x12] = 9; ram.props.mem[0x13] = 5;      // 59:
+    ram.props.mem[0x14] = 9; ram.props.mem[0x15] = 1;      // 19:59:59
+    sim2.reevalAll();
+    sim2.advance(1300000);
+    check('clock: 19:59:59 → 20:00:00 (时十位进位)', lcdText(sim2).startsWith('20:00:00'), lcdText(sim2));
+  }
   // 载入即冷启动: 烧入 counter 后 (菜单动作等价) 走时显示计数
   {
     const sim2 = loadCpu(VM8.PROGS.find(x => x.id === 'counter').src);
